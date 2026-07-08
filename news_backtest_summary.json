@@ -1,0 +1,77 @@
+{
+  "generated": "2026-07-08 20:11",
+  "horizon_sessions": 5,
+  "tune_tickers": [
+    "AAPL",
+    "NVDA",
+    "AMZN",
+    "JNJ",
+    "WMT",
+    "BP.L"
+  ],
+  "validate_tickers": [
+    "MSFT",
+    "TSLA",
+    "JPM",
+    "XOM",
+    "CAT",
+    "TSCO.L"
+  ],
+  "n_rows_total": 4145,
+  "date_range": [
+    "2017-05-01",
+    "2026-06-30"
+  ],
+  "weight_star_tune": 0.08,
+  "weight_best_on_validate": 0.06,
+  "results": [
+    {
+      "set": "tune",
+      "n": 1842,
+      "weight": 0.08,
+      "brier_price_only": 0.24904,
+      "brier_price_news": 0.24894,
+      "brier_delta": -0.0001,
+      "acc_price_only": 0.5407,
+      "acc_price_news": 0.544,
+      "always_up": 0.5494,
+      "news_auc": 0.5096
+    },
+    {
+      "set": "validate (blind w*)",
+      "n": 2303,
+      "weight": 0.08,
+      "brier_price_only": 0.24707,
+      "brier_price_news": 0.24701,
+      "brier_delta": -7e-05,
+      "acc_price_only": 0.5575,
+      "acc_price_news": 0.5562,
+      "always_up": 0.5593,
+      "news_auc": 0.5111
+    },
+    {
+      "set": "validate (its own best w)",
+      "n": 2303,
+      "weight": 0.06,
+      "brier_price_only": 0.24707,
+      "brier_price_news": 0.24701,
+      "brier_delta": -7e-05,
+      "acc_price_only": 0.5575,
+      "acc_price_news": 0.5558,
+      "always_up": 0.5593,
+      "news_auc": 0.5111
+    }
+  ],
+  "validate_delta_brier_ci95": [
+    -0.00044,
+    0.00036
+  ],
+  "news_signal_supported": false,
+  "feature": {
+    "source": "GDELT 2.0 timelinetone",
+    "smooth_days": 3,
+    "std_window_days": 365,
+    "tanh_scale": 1.5
+  },
+  "note": "Validates whether company news TONE predicts 5-session direction, tune/validate split by ticker parity. Not a drop-in live weight: GDELT worldwide tone differs from the app's VADER-over-reliable-outlets feature. News weight in logit space."
+}

@@ -1,6 +1,35 @@
 # HANDOFF — session state & next steps
 
-*Last updated: 2026-07-06 evening. Read this first when resuming work.*
+*Last updated: 2026-07-08. Read this first when resuming work.*
+
+## Session 2026-07-08 changes (newest first)
+
+- **Repo is now under git** (was not before). `.gitignore` excludes `.venv/`,
+  `__pycache__/`, `gdelt_cache/`, scratch. Commit as you go from here.
+- **Backtest edge now ships a moving-block bootstrap 95% CI** (`backtest.py::
+  _block_bootstrap_edge`) — the honest CI given overlapping windows. Finding
+  sharpened: at 1d/1w/1m the edge CI straddles zero (indistinguishable from
+  always-up); only 1-year is distinguishable and it's negative. Also fixed the
+  shuffled-outcome control (it compared to 50%, wrong for an always-up-ish model;
+  now compares to the up-rate).
+- **GDELT news backtest DONE** (was next-step #2). `app/data/gdelt.py` +
+  `news_backtest.py`. Verdict: **no out-of-sample edge from company news tone**
+  at 5 sessions (4,145 walk-forward preds, 9 companies, 2017-2026; validate
+  ΔBrier CI [-0.00044,+0.00036], AUC 0.51, best weight +0.06/+0.08 on a [-1,1]
+  feature). Acted on it: **v2.2 cut news priors** company 0.45→0.15, market
+  0.18→0.08, politics 0.12→0.05 (`config.py BLEND`); `MODEL_VERSION` →
+  `2.2-newsval`; `model_state.json` regenerated to the new priors (it was still
+  on `source:"prior"`, n_used 0). Not zeroed — GDELT tone ≠ live VADER feature,
+  and the learner can still raise them. Only company news was directly tested.
+- **Tests moved into the repo** (`tests/`, stdlib unittest, no pytest dep):
+  learner rails, block-bootstrap CI, GDELT parse/cache. Run with
+  `.venv/bin/python -m unittest discover -s tests`. Replaces the scratchpad ones.
+- GDELT gotcha: it enforces ~1 request / 5 s and a *burst* trips a multi-minute
+  IP cooldown returning HTTP 429 / a plain-text notice. The client paces at 8 s
+  and backs off 25 s on throttle; a heavy 9-year query still 429s occasionally
+  (AAPL/XOM/WMT were skipped this run — rerun `news_backtest.py` to fill them,
+  their cache is empty so they'll refetch). Single-phrase queries only; multi-term
+  OR queries time out server-side.
 
 ## What this project is
 
@@ -14,11 +43,12 @@ prediction ledger (`predictions.jsonl` → `/api/track-record`).
 
 ## State right now
 
-- **Model version `2.1-adaptive`** (see `app/config.py: MODEL_VERSION`).
+- **Model version `2.2-newsval`** (see `app/config.py: MODEL_VERSION`).
   Blend: `logit(base) + k_ml·(logit(p_ml) − logit(base)) + w_tech·tech + w_c·news_co + w_m·news_mkt + w_p·news_pol`, clipped [0.05, 0.95].
-  Weights are now **adaptive** (`app/analysis/learner.py`, state in
+  Weights are **adaptive** (`app/analysis/learner.py`, state in
   `model_state.json`): MAP logistic regression on resolved ledger outcomes,
-  Gaussian-anchored to the backtested priors (0.15/0.10/0.45/0.18/0.12).
+  Gaussian-anchored to the priors (now **0.15/0.10/0.15/0.08/0.05** — news cut
+  in v2.2 after the GDELT backtest found no edge; see the session-change note).
   Prior widths encode evidence: k_ml/tech tight (σ 0.08, backtest-validated),
   news loose (σ 0.5/0.35/0.3, never backtestable — live data can raise OR
   zero them). Rails: 40-outcome gate; per-weight bounds; shadow adoption test
@@ -93,6 +123,10 @@ Key findings, so we don't re-litigate them:
    this same data — don't, unless validated on pre-2016 data.
 5. Tune/validate discipline: parameters were chosen on even-indexed tickers,
    checked on odd-indexed. Keep doing that for any new knob.
+6. **Company news tone has no 5-day directional edge** (`news_backtest.py`,
+   GDELT 2017-2026, 4,145 walk-forward preds): validate ΔBrier CI straddles 0,
+   AUC 0.51. Drove the v2.2 news-prior cut. Don't restore the old 0.45 weight
+   without new evidence. Market/politics tilts remain judgment-only (untested).
 
 ## Prioritized next steps
 
@@ -102,12 +136,14 @@ Key findings, so we don't re-litigate them:
    2026); meaningful news-weight movement needs months. Watch `[learn]` lines in
    the server log and the "learning" block in `/api/track-record`. The server
    must be RUNNING to learn — which makes deployment (step 4) the real unlock.
-2. **Historical news backtest via GDELT** (the big one): GDELT 2.0 DOC API is
-   free and reaches back years — query daily article tone for a company name,
-   build a historical sentiment series, and extend `backtest.py` with a news
-   feature to finally validate/reweight the news tilts (currently 0.45/0.18/0.12,
-   chosen by judgment not evidence). Watch rate limits; cache aggressively;
-   match on cleaned company names like `news.py::_clean_company` does.
+2. ~~**Historical news backtest via GDELT**~~ **DONE 2026-07-08** — see the
+   session-change note up top. Verdict: no company-news-tone edge; news priors
+   cut in v2.2. Follow-ups if revisited: (a) rerun `news_backtest.py` to fill the
+   3 tickers 429-skipped this run (AAPL/XOM/WMT); (b) extend it to the *market*
+   and *politics* tilts with index/macro GDELT queries (only company was tested);
+   (c) the fitted +0.06/+0.08 sign was consistent across tune/validate — a hair
+   of signal, worth a second look with a better feature (event counts, tone
+   *change* vs level) before concluding it's exactly zero.
 3. **Multi-horizon UI**: the harness already evaluates 1d/21d; the predictor
    only ships 5d. Add a horizon selector (1w default) reusing `_base_rates` +
    per-horizon holdout, with the tail-clamping from finding 2 and per-horizon
@@ -147,12 +183,15 @@ Key findings, so we don't re-litigate them:
 
 ```
 run.sh                    one-command launcher (venv + uvicorn :8000)
-backtest.py               walk-forward harness + anti-cheat checks (~36s)
+backtest.py               walk-forward harness + anti-cheat + block-bootstrap edge CIs (~36s)
 backtest_results.csv      7,278 graded predictions (current model)
-backtest_summary.json     pooled stats per horizon
+backtest_summary.json     pooled stats per horizon (+ edge CIs, verdicts)
+news_backtest.py          walk-forward GDELT news-tone validation (v2.2)
+news_backtest_summary.json / _rows.csv   its results
 predictions.jsonl         live ledger (append-only, deduped ticker/day)
 model_state.json          adaptive weights + update history (learner)
 HANDOFF.md                this file — keep it updated at session end
+tests/                    stdlib unittest suite (learner rails, stats, gdelt)
 app/config.py             prior weights, tiers, watchlist, MODEL_VERSION
 app/analysis/predictor.py drift anchor, blend, holdout, analyze/snapshot
 app/analysis/learner.py   online MAP weight learning + shadow adoption test
@@ -161,6 +200,7 @@ app/analysis/technical.py indicators + plain-English signals
 app/analysis/sentiment.py finance-tuned VADER + recency weighting
 app/data/market.py        yfinance wrapper (history/quote/earnings/search)
 app/data/news.py          RSS + Yahoo company wire, concurrent + cached
+app/data/gdelt.py         cached GDELT daily news-tone client (rate-limit paced)
 app/data/ledger.py        prediction ledger (JSONL)
 app/server.py             FastAPI: predict/history/news/search/screener/
                           track-record/market-overview + static hosting

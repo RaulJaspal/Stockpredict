@@ -50,12 +50,21 @@ MODEL = {
     "tech_weight": 0.10,  # w: + w * technical_score
 }
 
-# News tilts (logit space). These cannot be backtested without a historical
-# headline archive, so unvalidated inputs deliberately get modest weight.
+# News tilts (logit space). Now with evidence: news_backtest.py reconstructs a
+# historical company-news tone series from GDELT (2017-2026) and grades it
+# out-of-sample. Across 4,145 walk-forward weekly predictions the company-tone
+# tilt showed NO directional edge (validate ΔBrier CI [-0.00044, +0.00036]
+# straddles 0; AUC 0.51; Brier-minimising weight only +0.06/+0.08 on a
+# [-1,1] feature). So the old judgment weights (0.45/0.18/0.12) were far too
+# large. They are cut to small, evidence-consistent values — not zero, because
+# the live VADER-over-reliable-outlets feature differs from GDELT worldwide tone
+# and the online learner can still raise them if live outcomes justify it.
+# (Only company news was directly tested; market/politics are shrunk by the same
+# logic — diffuse macro tone at a 5-day horizon is even less likely to predict.)
 BLEND = {
-    "news_company":   0.45,   # company-specific news sentiment in [-1, 1]
-    "news_market":    0.18,   # broad business-news sentiment
-    "news_politics":  0.12,   # politics & world-affairs sentiment
+    "news_company":   0.15,   # company-specific news sentiment in [-1, 1]
+    "news_market":    0.08,   # broad business-news sentiment
+    "news_politics":  0.05,   # politics & world-affairs sentiment
 }
 
 # Confidence tiers, calibrated on the walk-forward backtest: historically,
@@ -66,7 +75,9 @@ CONFIDENCE = {"medium": 0.05, "high": 0.10}
 # changes. Bump on any change to MODEL, BLEND or the feature set.
 # v2.1: blend weights become adaptive — learned online from resolved ledger
 # outcomes (see analysis/learner.py), anchored to these priors.
-MODEL_VERSION = "2.1-adaptive"
+# v2.2: news priors cut to evidence-consistent values after news_backtest.py
+# found no out-of-sample edge from company news tone (GDELT 2017-2026).
+MODEL_VERSION = "2.2-newsval"
 
 # Symbols scanned by the dashboard's signal screener.
 SCREENER_TICKERS = [

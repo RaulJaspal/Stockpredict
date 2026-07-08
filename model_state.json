@@ -2,12 +2,12 @@
   "weights": {
     "k_ml": 0.15,
     "tech": 0.1,
-    "news_company": 0.45,
-    "news_market": 0.18,
-    "news_politics": 0.12
+    "news_company": 0.15,
+    "news_market": 0.08,
+    "news_politics": 0.05
   },
   "source": "prior",
   "n_used": 0,
-  "updated_at": "2026-07-08 16:29",
+  "updated_at": "2026-07-08 20:12",
   "history": []
 }

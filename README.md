@@ -15,8 +15,8 @@ built and weighted by walk-forward backtesting, from reliable sources only:
 3. **Live news & politics sentiment** — headlines from the official feeds of **BBC News,
    Sky News, The Guardian, CNBC and MarketWatch** (business, politics and world desks),
    plus the company's own news wire, scored with a finance-tuned VADER sentiment model
-   and weighted by recency. News cannot be backtested without a historical archive, so
-   it deliberately gets modest weight.
+   and weighted by recency. A historical GDELT backtest (see below) found no directional
+   edge from company news tone, so v2.2 gives it a small, evidence-consistent weight.
 
 The result is a probability, a calibrated confidence tier, and an expected 5-day price
 range from realised volatility.
@@ -89,9 +89,34 @@ the 1-year one, and it is **negative** — drift below 0.5 after a crash predict
 that then recover. The blend earns its keep not by beating the baseline but by adding
 calibration, an expected range, per-headline news context and per-ticker honesty checks.
 Confidence tiers are calibrated on the same test (pooled: ~67% hit-rate for "high" vs
-~54% for "low", driven mostly by month/year drift). Caveats: the news tilt is untestable
-historically, tickers are today's survivors, prices are retroactively adjusted. (Exact
-figures drift slightly run-to-run because the 10-year window ends on the day you run it.)
+~54% for "low", driven mostly by month/year drift). Caveats: tickers are today's
+survivors and prices are retroactively adjusted. (Exact figures drift slightly
+run-to-run because the 10-year window ends on the day you run it.)
+
+## News validation (`news_backtest.py`, v2.2)
+
+The news tilt used to be the app's biggest unvalidated assumption — weighted 0.45
+(company) purely by judgment, because no historical headline archive was on hand.
+[GDELT 2.0](https://www.gdeltproject.org/) removes that excuse: it publishes a daily
+average-article-tone series for any query back to 2017. `news_backtest.py`
+reconstructs a per-company tone feature (smoothed, then standardised against a
+trailing 365-day window so it means "unusually good/bad news for *this* company",
+no lookahead) and grades it out of sample at the 5-session horizon, tune/validate
+split by ticker.
+
+**Result across 4,145 walk-forward weekly predictions (9 companies, 2017–2026): no
+directional edge from company news tone.** The Brier-minimising weight was only
++0.06 to +0.08 on a [−1, 1] feature; the validate-set Brier improvement CI is
+[−0.00044, +0.00036] (straddles zero) and the tone-vs-outcome rank AUC is 0.51
+(0.50 = nothing). So the 0.45 weight was ~6× larger than even the statistically-zero
+fitted effect. **v2.2 cuts the news priors to small, evidence-consistent values
+(company 0.45→0.15, market 0.18→0.08, politics 0.12→0.05)** — not to zero, because
+the live feature (VADER over reliable-outlet headlines) is a different construction
+from GDELT worldwide tone, and the online learner can still raise them if live
+outcomes ever justify it. Only company news was directly tested; market and politics
+are shrunk by the same logic (diffuse macro tone at 5 days is even less likely to
+predict). Run: `.venv/bin/python news_backtest.py` (first run fetches + caches GDELT,
+paced under its rate limit).
 
 ## API
 
@@ -121,6 +146,7 @@ sentiment reflects only the last few days of headlines, not fundamentals.
 - **News:** official RSS feeds of BBC News, Sky News, The Guardian, CNBC, MarketWatch;
   per-ticker wire via Yahoo Finance news
 - **Sentiment:** VADER (`vaderSentiment`) extended with a finance/politics lexicon
+- **Historical news tone:** GDELT 2.0 DOC API (`news_backtest.py`, for validation only)
 - **Model:** scikit-learn logistic regression; FastAPI + Lightweight Charts (TradingView) UI
 
 ## Adaptive learning (v2.1)
@@ -128,13 +154,13 @@ sentiment reflects only the last few days of headlines, not fundamentals.
 The blend weights are no longer fixed: while the server runs, it logs the whole
 watchlist every 6 hours and, as outcomes resolve, re-estimates the weights by MAP
 logistic regression on the live results (`app/analysis/learner.py`, state in
-`model_state.json`). The backtest-validated priors act as a Gaussian anchor whose
-tightness reflects the evidence behind each weight — price weights (validated on
-7,278 backtest predictions) move slowly; news weights (never backtestable) are
-loose enough for live data to raise them if news genuinely predicts, or shrink
-them toward zero if it doesn't.
+`model_state.json`). The priors act as a Gaussian anchor whose tightness reflects
+the evidence behind each weight — price weights (validated on 7,278 backtest
+predictions) move slowly; the news priors were cut in v2.2 after the GDELT
+backtest found no edge, but stay loose enough for live data to raise them if news
+genuinely predicts, or shrink them further toward zero if it doesn't.
 
-Safety rails, verified by synthetic tests: no adaptation below 40 resolved
+Safety rails, verified by the tests in `tests/`: no adaptation below 40 resolved
 outcomes; every weight bounded; and a shadow test — candidate weights are fit on
 the earliest 70% of outcomes and adopted only if they don't lose to the frozen
 priors on the most recent 30% (Brier score). Fail → priors restored. The model
@@ -148,8 +174,8 @@ Every prediction the app makes (screener and analysis pages alike) is appended t
 version. `GET /api/track-record` grades matured calls against the prices that
 actually followed and the dashboard shows the running hit rate, Brier score vs
 drift-alone, and per-confidence-tier results. This is the one test no backtest can
-fake, and the only way the news tilt gets validated: predictions graded on data
-that did not exist when they were made.
+fake: predictions graded on data that did not exist when they were made — and, with
+the GDELT news backtest now in place, a second independent check on the news tilt.
 
 For work-in-progress state and next steps across sessions, see **HANDOFF.md**.
 
@@ -161,8 +187,13 @@ app/
   server.py           FastAPI app + static hosting
   data/market.py      prices, quotes, earnings dates, symbol search (cached)
   data/news.py        concurrent RSS ingestion + company matching (cached)
+  data/gdelt.py       cached GDELT daily news-tone client (for news_backtest.py)
   analysis/technical.py   indicators + plain-English signal readings
   analysis/sentiment.py   finance-tuned VADER scoring + recency weighting
   analysis/predictor.py   ML model, backtest, evidence blend, expected range
+  analysis/learner.py     online MAP weight learning + shadow adoption test
   static/             dashboard (index.html, style.css, app.js)
+backtest.py           walk-forward price backtest + block-bootstrap edge CIs
+news_backtest.py      walk-forward GDELT news-tone validation (v2.2)
+tests/                stdlib unittest suite — `python -m unittest discover -s tests`
 ```
