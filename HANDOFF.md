@@ -136,6 +136,23 @@ Key findings, so we don't re-litigate them:
    2026); meaningful news-weight movement needs months. Watch `[learn]` lines in
    the server log and the "learning" block in `/api/track-record`. The server
    must be RUNNING to learn — which makes deployment (step 4) the real unlock.
+
+1b. **Verify the macOS auto-start → learn pipeline after a reboot.** A LaunchAgent
+   (`~/Library/LaunchAgents/com.stockpredict.server.plist`, `RunAtLoad` +
+   `KeepAlive`) starts `.venv/bin/python -m uvicorn app.server:app` on :8000 at
+   login; the server then runs a learn cycle 90 s after startup and every 6 h
+   (`server.py::_learning_loop`). Verified working 2026-07-08 (log shows scheduled
+   `[learn]` lines, now stamped with the v2.2 weights). To re-confirm after a
+   reboot / if learning ever seems stalled:
+   - `launchctl print gui/$(id -u)/com.stockpredict.server` → state should be
+     `running` (or `launchctl kickstart -k gui/$(id -u)/com.stockpredict.server`
+     to force a restart without rebooting);
+   - `curl -s 127.0.0.1:8000/api/track-record | python3 -m json.tool | grep -A6 learning`;
+   - `grep '\[learn\]' ~/Library/Logs/StockPredict.log | tail` → a fresh line
+     within ~2 min of startup, `source` flips `prior → adaptive` once n ≥ 40.
+   Gotchas: the agent assumes deps are already installed (it doesn't `pip install`
+   — run `./run.sh` once after any dependency change) and that `.venv` exists at
+   the path in the plist; if `.venv` is deleted, run `./run.sh` to rebuild it.
 2. ~~**Historical news backtest via GDELT**~~ **DONE 2026-07-08** — see the
    session-change note up top. Verdict: no company-news-tone edge; news priors
    cut in v2.2. Follow-ups if revisited: (a) rerun `news_backtest.py` to fill the
