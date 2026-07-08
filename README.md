@@ -69,22 +69,29 @@ moment. Anti-cheat checks run first: a causality audit (features at t unchanged 
 all later data is deleted), a no-peek sentinel (predictions bit-identical after the
 future is replaced with random noise), and a shuffled-outcome control.
 
-Result for the current model (direction hit-rate vs always-predict-up baseline):
+Result for the current model (direction hit-rate vs always-predict-up baseline).
+The **edge 95% CI** is a moving-block bootstrap (contiguous per-ticker blocks sized
+to the outcome-window overlap) — a plain binomial CI would assume the predictions are
+independent, which they are not:
 
-| horizon | n | model | always-up | edge |
-|---|---|---|---|---|
-| 1 day | 3,750 | 53.6% | 53.5% | +0.1pp |
-| 1 week | 1,500 | 54.9% | 55.3% | −0.3pp |
-| 1 month | 720 | 59.9% | 60.6% | −0.7pp |
-| 1 year* | 1,308 | 69.6% | 74.1% | −4.5pp |
+| horizon | n | model | always-up | edge | edge 95% CI | verdict |
+|---|---|---|---|---|---|---|
+| 1 day | 3,750 | 53.6% | 53.5% | +0.1pp | [−0.1, +0.3] | ≈ zero |
+| 1 week | 1,500 | 56.6% | 56.7% | −0.1pp | [−0.5, +0.2] | ≈ zero |
+| 1 month | 720 | 58.1% | 58.6% | −0.6pp | [−1.4, +0.3] | ≈ zero |
+| 1 year* | 1,308 | 69.4% | 73.8% | −4.4pp | [−8.2, −0.8] | loses to baseline |
 
-\* overlapping windows. The honest reading: no price-only strategy tested here beats
-simply knowing markets drift up — the original unshrunk model *lost* 2–10pp to that
-baseline; the current drift-anchored blend matches it while adding calibration, an
-expected range, per-headline news context and per-ticker honesty checks. Confidence
-tiers are calibrated on the same test (pooled: ~67% hit-rate for "high" vs ~54% for
-"low", driven mostly by month/year drift). Caveats: the news tilt is untestable
-historically, tickers are today's survivors, prices are retroactively adjusted.
+\* overlapping windows. The honest reading, now with intervals: at every short horizon
+the edge's 95% CI **straddles zero** — the model is statistically indistinguishable from
+simply knowing markets drift up. It does not beat the baseline; it matches it (the
+original unshrunk model *lost* 2–10pp to it). The only edge distinguishable from zero is
+the 1-year one, and it is **negative** — drift below 0.5 after a crash predicts down years
+that then recover. The blend earns its keep not by beating the baseline but by adding
+calibration, an expected range, per-headline news context and per-ticker honesty checks.
+Confidence tiers are calibrated on the same test (pooled: ~67% hit-rate for "high" vs
+~54% for "low", driven mostly by month/year drift). Caveats: the news tilt is untestable
+historically, tickers are today's survivors, prices are retroactively adjusted. (Exact
+figures drift slightly run-to-run because the 10-year window ends on the day you run it.)
 
 ## API
 

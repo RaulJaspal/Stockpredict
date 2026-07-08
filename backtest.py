@@ -196,12 +196,57 @@ def evaluate_ticker(tkr, df):
     return rows
 
 
+def _block_bootstrap_edge(d, block_len, n_boot=3000, seed=13):
+    """95% CI for the *edge* (model accuracy minus always-up accuracy) via a
+    moving-block bootstrap.
+
+    A plain binomial CI assumes independent predictions, which is false here:
+    consecutive predictions share overlapping outcome windows (grossly so at
+    the 1-year horizon, stride 21 vs window 252) and sit in the same
+    volatility regime, so their errors are correlated and the naive CI is far
+    too narrow. Instead we resample contiguous per-ticker blocks — preserving
+    that autocorrelation — and read the edge's 2.5/97.5 percentiles off the
+    bootstrap distribution. `block_len` is the number of consecutive
+    predictions whose outcome windows overlap (ceil(horizon / stride)).
+
+    Returns (edge, lo, hi, p_two_sided) in probability units. The paired
+    per-row statistic is (model_correct - always_up_correct) ∈ {-1, 0, +1};
+    always-up is correct exactly when the outcome was up, so its per-row
+    correctness equals `outcome_up`.
+    """
+    rng = np.random.default_rng(seed)
+    L = max(1, int(block_len))
+    edges_sum = np.zeros(n_boot)
+    total = 0
+    for _, g in d.sort_values("date").groupby("ticker", sort=False):
+        s = g.correct.to_numpy().astype(float) - g.outcome_up.to_numpy().astype(float)
+        n = len(s)
+        if n == 0:
+            continue
+        total += n
+        n_blocks = int(np.ceil(n / L))
+        starts = rng.integers(0, n, size=(n_boot, n_blocks))           # circular block starts
+        idx = (starts[:, :, None] + np.arange(L)[None, None, :]).reshape(n_boot, n_blocks * L)[:, :n] % n
+        edges_sum += s[idx].sum(axis=1)
+    if total == 0:
+        return float("nan"), None, None, None
+    edges = edges_sum / total
+    lo, hi = np.percentile(edges, [2.5, 97.5])
+    p = min(1.0, 2 * min(float((edges <= 0).mean()), float((edges >= 0).mean())))
+    obs = float(d.correct.mean() - d.outcome_up.mean())
+    return obs, float(lo), float(hi), p
+
+
 def summarize(res):
     order = [h[0] for h in HORIZONS]
+    stride_of = {h[0]: h[3] for h in HORIZONS}
+    horizon_of = {h[0]: h[1] for h in HORIZONS}
     summary = {}
     print("\n=== pooled results by horizon (all tickers) ===")
+    print("edge = model accuracy − always-up accuracy; CI is a moving-block "
+          "bootstrap that respects overlapping windows")
     hdr = (f"{'horizon':<9} {'n':>5}  {'model':>6}  {'always-up':>9}  {'edge':>6}  "
-           f"{'95% CI':>12}  {'ret after UP':>12}  {'ret after DOWN':>14}")
+           f"{'edge 95% CI':>18}  {'verdict':>16}  {'ret UP':>8}  {'ret DOWN':>9}")
     print(hdr)
     print("-" * len(hdr))
     for label in order:
@@ -211,22 +256,30 @@ def summarize(res):
         n = len(d)
         acc = d.correct.mean()
         base = d.outcome_up.mean()          # accuracy of "always predict up"
-        edge = acc - base
         overlap = label == "1 year"
-        ci = 1.96 * math.sqrt(acc * (1 - acc) / n)
-        ci_txt = "n/a (overlap)" if overlap else f"±{ci * 100:.1f}pp"
+        block_len = max(1, math.ceil(horizon_of[label] / stride_of[label]))
+        edge, lo, hi, pval = _block_bootstrap_edge(d, block_len)
+        distinguishable = not (lo <= 0.0 <= hi)
+        verdict = ("beats baseline" if lo > 0 else
+                   "loses to baseline" if hi < 0 else
+                   "≈ zero (0 in CI)")
+        ci_txt = f"[{lo * 100:+.1f}, {hi * 100:+.1f}]pp"
         up_calls = d[d.p_up >= 0.5]
         dn_calls = d[d.p_up < 0.5]
         ret_up = up_calls.fwd_return.mean() * 100 if len(up_calls) else float("nan")
         ret_dn = dn_calls.fwd_return.mean() * 100 if len(dn_calls) else float("nan")
         print(f"{label:<9} {n:>5}  {acc * 100:>5.1f}%  {base * 100:>8.1f}%  {edge * 100:>+5.1f}pp  "
-              f"{ci_txt:>12}  {ret_up:>11.2f}%  {ret_dn:>13.2f}%")
+              f"{ci_txt:>18}  {verdict:>16}  {ret_up:>7.2f}%  {ret_dn:>8.2f}%")
         conf = d[(d.p_up - 0.5).abs() >= 0.10]
         summary[label] = {
             "n": int(n), "model_accuracy": round(float(acc), 4),
             "always_up_accuracy": round(float(base), 4),
             "edge_pp": round(float(edge) * 100, 2),
-            "ci95_pp": None if overlap else round(ci * 100, 2),
+            "edge_ci95_pp": [round(lo * 100, 2), round(hi * 100, 2)],
+            "edge_p_value": round(float(pval), 4),
+            "edge_distinguishable_from_zero": bool(distinguishable),
+            "edge_verdict": verdict,
+            "bootstrap_block_len": int(block_len),
             "overlapping_windows": overlap,
             "mean_fwd_return_after_up_call_pct": round(float(ret_up), 3) if len(up_calls) else None,
             "mean_fwd_return_after_down_call_pct": round(float(ret_dn), 3) if len(dn_calls) else None,
@@ -238,13 +291,32 @@ def summarize(res):
             "dates": [str(d.date.min()), str(d.date.max())],
         }
 
-    # Shuffled-outcome control: scorer must collapse to ~50% on permuted answers.
+    distinguishable_any = [l for l in order if l in summary
+                           and summary[l]["edge_distinguishable_from_zero"]]
+    if distinguishable_any:
+        print(f"\nNOTE  horizons with an edge distinguishable from zero: {', '.join(distinguishable_any)}")
+    else:
+        print("\nNOTE  at no horizon is the edge distinguishable from zero — every 95% "
+              "bootstrap CI straddles it.\n      The model matches the always-up baseline; "
+              "it does not beat it. This is the honest result.")
+
+    # Shuffled-outcome control: against randomly permuted labels the scorer must
+    # collapse to chance. "Chance" is NOT 50% here — the model is drift-anchored
+    # and calls UP on almost every row, so its accuracy against random labels
+    # tends to the up-rate, not to a coin flip. The honest null is
+    #   P(pred=up)*up_rate + P(pred=down)*(1-up_rate).
     rng = np.random.default_rng(11)
     d5 = res[res.horizon == "1 week"]
+    preds_up = (d5.p_up.to_numpy() >= 0.5)
+    up_rate = float(d5.outcome_up.mean())
+    expected = preds_up.mean() * up_rate + (1 - preds_up.mean()) * (1 - up_rate)
     shuffled = rng.permutation(d5.outcome_up.to_numpy())
-    sh_acc = ((d5.p_up.to_numpy() >= 0.5) == shuffled).mean()
-    print(f"\nPASS  shuffled-outcome control (1-week set): {sh_acc * 100:.1f}% ≈ 50% — the scorer isn't leaking answers")
-    summary["_shuffled_control_accuracy"] = round(float(sh_acc), 4)
+    sh_acc = float((preds_up == shuffled).mean())
+    ok = abs(sh_acc - expected) < 0.03
+    print(f"\n{'PASS' if ok else 'FAIL'}  shuffled-outcome control (1-week set): {sh_acc * 100:.1f}% ≈ "
+          f"{expected * 100:.1f}% expected under random labels — the scorer isn't leaking answers")
+    summary["_shuffled_control_accuracy"] = round(sh_acc, 4)
+    summary["_shuffled_control_expected"] = round(float(expected), 4)
 
     print("\n=== per-ticker, 1-week horizon (the app's native horizon) ===")
     print(f"{'ticker':<8} {'n':>4}  {'model':>6}  {'always-up':>9}  {'edge':>7}")

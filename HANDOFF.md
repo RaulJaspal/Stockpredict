@@ -53,14 +53,26 @@ prediction ledger (`predictions.jsonl` → `/api/track-record`).
 
 Walk-forward, 7,278 predictions, 15 tickers, 2016–2026, strict no-lookahead
 (causality audit + no-peek noise sentinel + shuffled-outcome control all PASS).
-Edge = direction accuracy minus always-up baseline:
+Edge = direction accuracy minus always-up baseline. The edge now ships with a
+**moving-block bootstrap 95% CI** (per-ticker blocks sized to the outcome-window
+overlap = ceil(h/stride); see `backtest.py::_block_bootstrap_edge`) — the honest
+CI, because consecutive predictions are autocorrelated:
 
-| horizon | v1 (unshrunk) | v2.0 (drift-anchored, current) |
-|---|---|---|
-| 1 day (n=3750) | −1.7pp | **+0.1pp** |
-| 1 week (n=1500) | −3.9pp | **−0.3pp** |
-| 1 month (n=720) | −4.4pp | **−0.7pp** |
-| 1 year (n=1308, overlapping) | −9.9pp | **−4.5pp** |
+| horizon | v1 (unshrunk) | v2 edge | edge 95% CI (block-bootstrap) |
+|---|---|---|---|
+| 1 day (n=3750) | −1.7pp | **+0.1pp** | [−0.1, +0.3] — ≈ zero |
+| 1 week (n=1500) | −3.9pp | **−0.1pp** | [−0.5, +0.2] — ≈ zero |
+| 1 month (n=720) | −4.4pp | **−0.6pp** | [−1.4, +0.3] — ≈ zero |
+| 1 year (n=1308, overlapping) | −9.9pp | **−4.4pp** | [−8.2, −0.8] — loses |
+
+Read this the honest way: **only the 1-year edge is distinguishable from zero, and
+it's negative.** At 1d/1w/1m the CI straddles zero — indistinguishable from always-up.
+The paired-delta bootstrap CIs are *tighter* than the old naive Wald ±1.6pp because
+the model and always-up make identical calls on nearly every row, so the edge has
+little variance — it is precisely, confidently ~0. (Also fixed: the shuffled-outcome
+control now compares against the correct null — the up-rate, not 50% — because a
+drift-anchored model that calls UP almost everywhere scores the up-rate on random
+labels, not a coin flip.)
 
 Key findings, so we don't re-litigate them:
 1. **No price-only edge exists in these features.** Per-ticker ML at full
