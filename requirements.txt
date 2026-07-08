@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+yfinance>=0.2.40
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.4
+feedparser>=6.0
+vaderSentiment>=3.3.2
+requests>=2.31

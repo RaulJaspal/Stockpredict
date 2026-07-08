@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockPredict — Market Signal Engine</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script defer src="/static/app.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/">📈 <strong>StockPredict</strong><span class="brand-tag">signal engine</span></a>
+  <div class="search-wrap">
+    <input id="search" type="text" role="combobox" aria-expanded="false" aria-controls="search-results"
+           placeholder="Search a ticker or company — e.g. AAPL, Tesla, BARC.L" autocomplete="off" spellcheck="false">
+    <div id="search-results" class="search-results" role="listbox" hidden></div>
+  </div>
+</header>
+
+<div class="ribbon" role="note">
+  Research tool — every number here is a statistical estimate with real uncertainty, <strong>not financial advice</strong>.
+</div>
+
+<main>
+  <section id="overview" aria-labelledby="overview-h">
+    <div class="section-head">
+      <h2 id="overview-h">Market now</h2>
+      <div id="macro-chips" class="chips" title="Recency-weighted sentiment of live headlines"></div>
+    </div>
+    <div id="tiles" class="tiles" aria-label="Major indices"></div>
+  </section>
+
+  <section id="screener" aria-labelledby="screener-h">
+    <div class="section-head">
+      <h2 id="screener-h">Signal screener</h2>
+      <div class="conf-toggles" id="conf-toggles" role="group" aria-label="Filter by confidence"></div>
+      <span id="screener-meta" class="meta-note"></span>
+    </div>
+    <div id="screener-grid" class="screener-grid">
+      <p class="screener-status">Scanning the watchlist — prices, models and news for 20 symbols…</p>
+    </div>
+  </section>
+
+  <section id="track" aria-labelledby="track-h" hidden>
+    <div class="section-head">
+      <h2 id="track-h">Live track record</h2>
+      <span id="track-meta" class="meta-note">every prediction the app makes is logged, then graded against what prices actually do</span>
+    </div>
+    <div class="card track-card" id="track-card"></div>
+  </section>
+
+  <div class="chip-row" id="quick-picks" aria-label="Quick picks"></div>
+
+  <p id="status" class="status" hidden></p>
+
+  <section id="analysis" aria-label="Ticker analysis" hidden>
+    <div class="analysis-head">
+      <div id="quote-block"></div>
+      <div class="range-row" role="group" aria-label="Chart range" id="range-row"></div>
+    </div>
+
+    <div class="grid">
+      <div class="col">
+        <div class="card" id="prediction-card"></div>
+        <div class="card" id="plan-card" hidden></div>
+        <div class="card" id="components-card"></div>
+        <div class="card" id="signals-card"></div>
+      </div>
+      <div class="col">
+        <div class="card chart-card">
+          <div class="chart-top">
+            <div class="chart-legend" id="chart-legend"></div>
+          </div>
+          <div id="chart-readout" class="readout" aria-live="off"></div>
+          <div id="chart" role="img" aria-label="Price chart"></div>
+          <details class="table-view">
+            <summary>Data table — last 30 sessions</summary>
+            <div class="table-wrap"><table id="sessions-table"></table></div>
+          </details>
+        </div>
+        <div class="card news-card">
+          <div class="tabs" role="tablist" id="news-tabs"></div>
+          <ul id="news-list" class="news-list"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="empty-state" class="empty">
+    <h2>Pick a ticker to analyse</h2>
+    <p>StockPredict blends two years of price history, a per-ticker statistical model, and live headline
+       sentiment from BBC News, Sky News, The Guardian, CNBC and MarketWatch — including politics —
+       into one honest probability for the next five trading sessions.</p>
+  </section>
+
+  <details class="how">
+    <summary>How predictions are made (and what they can't do)</summary>
+    <div class="how-body">
+      <ol>
+        <li><strong>Drift anchor.</strong> The probability starts from the ticker's own historical 5-session
+            up-rate — in a 10-year walk-forward test (7,278 predictions, 15 tickers, strict no-lookahead)
+            this drift was the strongest signal in price data, so everything else is a tilt around it.</li>
+        <li><strong>Price tilts.</strong> A logistic-regression model trained on that ticker's history and a
+            composite technical read nudge the anchor with small, backtest-validated weights (0.15 and 0.10 —
+            larger weights measurably subtracted accuracy). The most recent 60 sessions are held out to grade
+            this exact blend against an always-up baseline, and that hit-rate ships with every prediction.</li>
+        <li><strong>News &amp; politics.</strong> Live headlines from the official feeds of BBC News, Sky News,
+            The Guardian, CNBC and MarketWatch, plus the company's own news wire, are scored with a
+            finance-tuned sentiment model and weighted by recency (company news half-life 48&nbsp;h, macro 24&nbsp;h).
+            News can't be backtested without a historical archive, so it deliberately gets modest weight.</li>
+        <li><strong>Confidence.</strong> Tiers are calibrated on the walk-forward test. Pooled across
+            horizons, "high" calls (≥10 points from a coin flip) were right ~67% of the time vs ~54% for
+            "low" — but that separation comes mostly from month/year-scale drift; at the 5-session horizon
+            every tier sits in the mid-50s. Read "high" as "the evidence lines up", never as a sure thing.
+            Realised volatility gives the expected 5-day price range.</li>
+      </ol>
+      <p><strong>What this can't do:</strong> short-horizon stock moves are mostly noise, and a well-calibrated
+         tool will often — correctly — read close to 50%. The walk-forward test showed no strategy here reliably
+         beats simply knowing that markets drift up; what this app adds is calibration, context and honesty about
+         exactly that. Treat every output as a research signal to investigate, never as a reason on its own to trade.</p>
+    </div>
+  </details>
+</main>
+
+<footer>
+  <p><strong>Data:</strong> Yahoo Finance &nbsp;·&nbsp; <strong>News:</strong> BBC News, Sky News, The Guardian, CNBC, MarketWatch (official feeds)</p>
+  <p>StockPredict is an educational research tool. Nothing on this page is financial advice, and no algorithm can reliably predict markets.</p>
+</footer>
+
+<div id="toast" role="alert" hidden></div>
+
+</body>
+</html>
