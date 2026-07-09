@@ -54,7 +54,7 @@ python3 -m venv .venv
 
 ## What you get
 
-- **Signal screener** at the top: 20 watchlist symbols scanned concurrently, each with
+- **Signal screener** at the top: 49 watchlist symbols scanned concurrently, each with
   direction, probability, confidence and a one-line trade plan (buy level · sell level ·
   typical sessions to get there), filterable by All / High / Medium / Low confidence
   toggles — click any card for the full analysis

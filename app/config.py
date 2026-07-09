@@ -109,10 +109,23 @@ CONFIDENCE = {"medium": 0.05, "high": 0.10}
 # found no out-of-sample edge from company news tone (GDELT 2017-2026).
 MODEL_VERSION = "2.2-newsval"
 
-# Symbols scanned by the dashboard's signal screener.
+# Symbols scanned by the dashboard's signal screener. Also the universe the
+# daily tick logs, so a wider, sector-diversified list means the online learner
+# reaches its 40-outcome gate sooner and adapts the (news) weights weeks earlier
+# — more resolved outcomes per day is the honest way to speed up learning.
 SCREENER_TICKERS = [
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD",
-    "JPM", "V", "JNJ", "LLY", "XOM", "WMT", "KO", "DIS",
+    # mega-cap tech / semis
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD", "AVGO",
+    "ORCL", "CRM", "ADBE", "CSCO", "QCOM", "TXN", "IBM", "NFLX",
+    # financials
+    "JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "AXP",
+    # healthcare
+    "JNJ", "LLY", "UNH", "ABBV", "MRK", "PFE",
+    # consumer
+    "WMT", "COST", "HD", "MCD", "NKE", "KO", "PEP", "PG", "DIS",
+    # energy / industrial
+    "XOM", "CVX", "CAT", "BA", "HON",
+    # UK large caps + index + crypto
     "BP.L", "HSBA.L", "^GSPC", "BTC-USD",
 ]
 

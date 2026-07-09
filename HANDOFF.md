@@ -40,6 +40,11 @@ features, same priors, same `_blend_price`).
   ports the causality audit + no-peek sentinel from `backtest.py` onto synthetic data, so
   the anti-cheat guarantee runs in CI. Tests: 12 → 26. `.gitignore` now excludes research
   `*.pkl` caches.
+- **Watchlist expanded 20 → 49** (`config.SCREENER_TICKERS`, sector-diversified liquid
+  large-caps). Purpose: more resolved outcomes/day so the online learner hits its
+  40-outcome gate in ~1 trading day instead of ~2, and the (loose-prior) news weights
+  start adapting weeks sooner — the honest way to "let news earn its weight faster" without
+  pre-trusting it. Tick over 49 names ≈ 36s (fine for CI). Screener stays concurrent.
 - **PEAD shipped — the app's FIRST validated directional edge.** `research/pead.py`:
   on 2,957 earnings events (30 large-caps, 2001-2026, enter day *after* the report), the
   EPS-surprise sign predicts the next month's drift — 57.6% hit, +0.87% net long-short,
@@ -221,7 +226,7 @@ Key findings, so we don't re-litigate them:
 ## Prioritized next steps
 
 1. **Let the ledger accumulate** (zero work now that the server self-logs every
-   6 h): ~20 predictions/day. The 40-outcome adaptation gate opens ~2 trading
+   6 h): ~49 predictions/day (watchlist expanded 2026-07-09). The 40-outcome gate opens ~1 trading
    days after logging starts (first outcomes resolve 5 sessions out, so ~mid-July
    2026); meaningful news-weight movement needs months. Watch `[learn]` lines in
    the server log and the "learning" block in `/api/track-record`. The server
