@@ -30,7 +30,7 @@ from ..config import (BLEND, CONFIDENCE, HALF_LIFE_COMPANY, HALF_LIFE_MACRO,
                       HOLDOUT_DAYS, HORIZON_DAYS, MIN_ROWS_FOR_ML, MODEL,
                       MODEL_VERSION)
 from ..data import ledger, market, news
-from . import learner, planner, sentiment, technical
+from . import learner, planner, sentiment, technical, volatility
 
 FEATURES = [
     "ret1", "ret5", "ret10", "ret21", "rsi14", "macd_hist_n",
@@ -132,7 +132,10 @@ def _price_model(ind):
     hold_model = fit(train_pos, y_train)
 
     # Grade the exact blended output (anchor + ML tilt + technical tilt) on the
-    # 60 held-out sessions, against the always-up baseline.
+    # held-out sessions, against the always-up baseline. NOTE the windows overlap
+    # (consecutive days, each a 5-session outcome), so the *effective* number of
+    # independent tests is ~ holdout_days / horizon, not holdout_days — the
+    # comparison to baseline is treated with that much noise (see _confidence).
     correct = []
     for pos, actual in zip(test_pos, y_test):
         p_ml_i = float(hold_model.predict_proba(X[pos:pos + 1])[0, 1]) if hold_model else None
@@ -144,6 +147,7 @@ def _price_model(ind):
         "hit_rate": round(float(np.mean(correct)), 3),
         "baseline": round(float(np.mean(y_test)), 3),   # always-up accuracy
         "holdout_days": int(holdout_n),
+        "effective_n": max(1, int(holdout_n // HORIZON_DAYS)),   # non-overlapping equiv.
         "train_rows": int(len(train_pos)),
     }
 
@@ -154,20 +158,12 @@ def _price_model(ind):
 
 
 def _expected_range(ind):
-    """~80% price band over the horizon from 21-day realised volatility.
-    Multiplier 1.34 (not the Gaussian 1.28) was fit to give 80% empirical
-    coverage on tune tickers and verified at 80.0% on held-out tickers —
-    real 5-day moves have fatter tails than normal."""
-    close = float(ind["Close"].iloc[-1])
-    sigma = float(ind["vol21"].iloc[-1])
-    if np.isnan(sigma):
-        return None
-    move = 1.34 * sigma * np.sqrt(HORIZON_DAYS)
-    return {
-        "low": round(close * (1 - move), 2),
-        "high": round(close * (1 + move), 2),
-        "pct": round(move * 100, 2),
-    }
+    """~80% price band over the horizon from an EWMA volatility forecast and
+    empirically-calibrated fat-tailed quantiles (analysis/volatility.py).
+    Replaces the old 21-day-rolling × 1.34 heuristic: same 80% coverage, but
+    sharper and far better calibrated across calm/stressed regimes (validated
+    walk-forward, LOO coverage 0.800; see research/vol_backtest.py)."""
+    return volatility.expected_range(ind["Close"].to_numpy(dtype=float), HORIZON_DAYS)
 
 
 def _confidence(p_up, holdout):
@@ -175,11 +171,19 @@ def _confidence(p_up, holdout):
     level = ("high" if edge >= CONFIDENCE["high"]
              else "medium" if edge >= CONFIDENCE["medium"] else "low")
     caveat = None
-    if holdout and holdout["hit_rate"] < holdout["baseline"]:
-        level = "low"
-        caveat = ("On the last {} sessions this blend did not beat the always-up "
-                  "baseline for this ticker — treat the call with extra caution."
-                  ).format(holdout["holdout_days"])
+    # Only downgrade when the holdout MEANINGFULLY loses to always-up — i.e. the
+    # shortfall exceeds one standard error of a hit-rate at the *effective*
+    # (non-overlapping) sample size. Without this, the plain hit_rate < baseline
+    # test fires on pure noise roughly half the time, because the 60 overlapping
+    # 5-day windows carry only ~12 independent samples.
+    if holdout:
+        eff_n = holdout.get("effective_n") or max(1, holdout["holdout_days"] // HORIZON_DAYS)
+        se = (0.25 / eff_n) ** 0.5
+        if holdout["hit_rate"] < holdout["baseline"] - se:
+            level = "low"
+            caveat = ("On the last {} sessions this blend clearly trailed the always-up "
+                      "baseline for this ticker (beyond sampling noise) — treat the call "
+                      "with extra caution.").format(holdout["holdout_days"])
     return level, caveat
 
 
@@ -210,9 +214,12 @@ def _assess(ticker):
     p_up = float(np.clip(_sigmoid(logit), 0.05, 0.95))
 
     confidence, caveat = _confidence(p_up, pm["holdout"])
+    expected_range = _expected_range(ind)
 
     # Log to the live ledger (deduped per ticker/day) so /api/track-record can
-    # grade this prediction against reality once the horizon matures.
+    # grade this prediction against reality once the horizon matures — both the
+    # direction call AND the expected-range band (in_band coverage should run
+    # ~80% if the volatility model is honestly calibrated live).
     try:
         ledger.record({
             "model_version": MODEL_VERSION,
@@ -229,12 +236,13 @@ def _assess(ticker):
             "news_company": s_company["score"],
             "news_market": s_market["score"],
             "news_politics": s_politics["score"],
+            "range_low": expected_range["low"] if expected_range else None,
+            "range_high": expected_range["high"] if expected_range else None,
             "weights": {k: round(v, 3) for k, v in W.items()},
         })
     except OSError:
         pass  # a read-only disk must never break predictions
 
-    expected_range = _expected_range(ind)
     return {
         "quote": quote,
         "ind": ind,
@@ -295,8 +303,9 @@ def analyze(ticker):
         "backtest": ({
             **holdout,
             "note": ("Hit-rate of this exact blend on the most recent {} sessions it never "
-                     "trained on, vs. always predicting up. Overlapping 5-day windows, so "
-                     "treat as indicative.").format(holdout["holdout_days"]),
+                     "trained on, vs. always predicting up. The 5-day windows overlap, so "
+                     "this is only ~{} independent tests — indicative, not decisive."
+                     ).format(holdout["holdout_days"], holdout["effective_n"]),
         } if holdout else None),
         "news": {k: v[:12] for k, v in a["news_lists"].items()},
         "earnings_date": market.get_next_earnings(ticker),

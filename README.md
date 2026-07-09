@@ -19,7 +19,10 @@ built and weighted by walk-forward backtesting, from reliable sources only:
    edge from company news tone, so v2.2 gives it a small, evidence-consistent weight.
 
 The result is a probability, a calibrated confidence tier, and an expected 5-day price
-range from realised volatility.
+range. The range is the app's most *predictable* output — direction at short horizons is
+near-random, but volatility is strongly autocorrelated — so it is forecast with an EWMA
+(RiskMetrics λ=0.97) volatility model and empirically-calibrated fat-tailed quantiles,
+and its live coverage is tracked in the track record (see below).
 
 ## Quick start
 
@@ -118,6 +121,43 @@ are shrunk by the same logic (diffuse macro tone at 5 days is even less likely t
 predict). Run: `.venv/bin/python news_backtest.py` (first run fetches + caches GDELT,
 paced under its rate limit).
 
+## Volatility / expected-range validation (`research/vol_backtest.py`)
+
+Because short-horizon *direction* has no edge, the expected-range band is the app's most
+useful output — and it is now forecast honestly. The old band was `±1.34·σ₂₁·√5` (a
+21-day equal-weighted rolling std with a fudge multiplier). That is well-calibrated on
+average but mis-calibrated *across regimes*: an equal-weighted window under-covers in
+calm markets and over-covers in stressed ones (it keeps a passed volatility spike in view
+for a full month). Replaced with an **EWMA (RiskMetrics λ=0.97) forecast + empirically-
+calibrated asymmetric quantiles** of standardized 5-day log returns. Walk-forward,
+tune/validate split by ticker, over 10y and 15 tickers:
+
+| metric (validate tickers) | old `rolling21×1.34` | new `ewma97` |
+|---|---|---|
+| overall coverage (target 0.80) | 0.805 | 0.795 |
+| overall band width | 10.35% | **9.68%** (~6% sharper) |
+| width in stressed regime | 17.50% | **15.87%** (~10% sharper) |
+| calm→stressed coverage drift | 0.11 | **0.06** (~2× flatter) |
+
+Leave-one-ticker-out coverage of the frozen quantiles: mean 0.800, range 0.775–0.828 —
+they generalize, not overfit. Shipped in `app/analysis/volatility.py`. The asymmetry also
+captures the small positive 5-day drift for free. **Every band is now graded live**: the
+ledger logs `range_low`/`range_high`, and `/api/track-record` reports the realized 80%
+coverage — the honest check that the volatility model stays calibrated out of sample.
+
+## Cross-sectional signal research (`research/cross_sectional.py`)
+
+Absolute direction has no edge, but the robust anomalies (short-term reversal, momentum)
+live in *relative* ranking, so this tests a long-short (top-minus-bottom-quintile)
+backtest across 40 liquid large-caps, 2016–2026, non-overlapping holds, gross **and** net
+of costs, with a block-bootstrap CI and a first-/second-half persistence check.
+**Verdict: no edge that clears the bar at the 5-day horizon.** Short-term reversal is dead
+on liquid mega-caps (hit-rate ≤ 0.49, CIs straddle 0). Cross-sectional 12-1 momentum is
+the one signal with a consistent positive sign in both halves (gross Sharpe ~0.45), but
+its 95% CI still straddles zero on this sample and its net Sharpe is ≤ 0.16 after costs
+(negative at weekly rebalancing). Documented, not shipped — momentum is strongest at a
+*monthly* hold and is the one signal worth revisiting with the multi-horizon roadmap.
+
 ## API
 
 | Endpoint | Purpose |
@@ -173,9 +213,11 @@ Every prediction the app makes (screener and analysis pages alike) is appended t
 `predictions.jsonl` — deduped per ticker per trading day, stamped with the model
 version. `GET /api/track-record` grades matured calls against the prices that
 actually followed and the dashboard shows the running hit rate, Brier score vs
-drift-alone, and per-confidence-tier results. This is the one test no backtest can
-fake: predictions graded on data that did not exist when they were made — and, with
-the GDELT news backtest now in place, a second independent check on the news tilt.
+drift-alone, per-confidence-tier results, and the **realized coverage of the expected-
+range band** (should sit near 80% — a live calibration check on the volatility model).
+This is the one test no backtest can fake: predictions graded on data that did not exist
+when they were made — and, with the GDELT news backtest now in place, a second independent
+check on the news tilt.
 
 For work-in-progress state and next steps across sessions, see **HANDOFF.md**.
 
@@ -191,9 +233,13 @@ app/
   analysis/technical.py   indicators + plain-English signal readings
   analysis/sentiment.py   finance-tuned VADER scoring + recency weighting
   analysis/predictor.py   ML model, backtest, evidence blend, expected range
+  analysis/volatility.py  EWMA vol forecast + calibrated expected-range band
   analysis/learner.py     online MAP weight learning + shadow adoption test
+  analysis/planner.py     ATR trade brackets with empirical odds + honest level edge
   static/             dashboard (index.html, style.css, app.js)
 backtest.py           walk-forward price backtest + block-bootstrap edge CIs
 news_backtest.py      walk-forward GDELT news-tone validation (v2.2)
+research/             validated experiments: vol_backtest.py, cross_sectional.py
 tests/                stdlib unittest suite — `python -m unittest discover -s tests`
+.github/workflows/    CI: runs the hermetic test suite on every push/PR
 ```

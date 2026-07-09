@@ -17,6 +17,10 @@ scratchpad/
 # GDELT response cache (regenerable; a past range never changes)
 gdelt_cache/
 
+# Research data caches (large binary OHLCV snapshots, regenerable on first run)
+research/*.pkl
+*.pkl
+
 # Local overrides
 .env
 *.local

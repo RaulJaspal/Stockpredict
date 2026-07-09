@@ -4,6 +4,7 @@ Run with:  uvicorn app.server:app --port 8000
 """
 
 import math
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -106,6 +107,7 @@ def track_record():
             "realized_pct": r["realized_pct"],
             "correct": r["correct"],
             "outcome_up": r["outcome_up"],
+            "in_band": r.get("in_band"),
         } for r in graded["resolved"]]
         stats = None
         if resolved:
@@ -122,10 +124,17 @@ def track_record():
                 if sub:
                     by_conf[tier] = {"n": len(sub),
                                      "hit_rate": round(sum(r["correct"] for r in sub) / len(sub), 3)}
+            # Live calibration of the expected-range band: should run ~0.80.
+            banded = [r for r in resolved if r.get("in_band") is not None]
+            range_cov = ({"n": len(banded),
+                          "coverage": round(sum(r["in_band"] for r in banded) / len(banded), 3),
+                          "target": 0.80}
+                         if banded else None)
             stats = {"hit_rate": round(hit, 3), "always_up": round(always_up, 3),
                      "brier": round(brier, 4),
                      "brier_drift": round(brier_drift, 4) if brier_drift is not None else None,
-                     "by_confidence": by_conf}
+                     "by_confidence": by_conf,
+                     "range_coverage": range_cov}
         resolved.sort(key=lambda r: r["resolved_on"], reverse=True)
         return {
             "n_logged": len(records),
@@ -183,6 +192,12 @@ def _learning_loop():
 
 @app.on_event("startup")
 def _start_learning():
+    # In read-only mode (the local dashboard) the daily GitHub job owns logging
+    # and learning, so the in-process loop is disabled — nothing writes locally.
+    if os.environ.get("STOCKPREDICT_READONLY") == "1":
+        print("[startup] read-only mode — learning loop disabled "
+              "(the daily GitHub tick owns the ledger)", flush=True)
+        return
     threading.Thread(target=_learning_loop, daemon=True).start()
 
 

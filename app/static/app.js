@@ -246,6 +246,9 @@ async function loadTrackRecord() {
       const t = data.stats.by_confidence && data.stats.by_confidence[tier];
       if (t) stats.append(fact(`${tier} conf.`, `${Math.round(t.hit_rate * 100)}%`, `${t.n} calls`));
     }
+    const rc = data.stats.range_coverage;
+    if (rc) stats.append(fact("Range coverage", `${Math.round(rc.coverage * 100)}%`,
+      `${rc.n} bands · target ${Math.round(rc.target * 100)}%`));
     card.append(stats);
 
     const details = el("details", "table-view");
@@ -507,10 +510,10 @@ function renderPlan(plan) {
       `hit first in ${plan.stop_first_pct}% of past cases · caps further downside at ≈${plan.risk_pct}%`);
   }
 
-  const expectancy = (plan.target_first_pct * plan.reward_pct - plan.stop_first_pct * plan.risk_pct) / 100;
+  const sign = (x) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}%`;
   card.append(el("p", "fine",
-    `Reward:risk ${plan.risk_reward}:1 (+${plan.reward_pct}% vs −${plan.risk_pct}%); historical expectancy of this exact bracket ≈ ${expectancy >= 0 ? "+" : ""}${expectancy.toFixed(2)}% per trade before costs — near zero is normal: levels manage risk, they don't create edge. ` +
-    `In ${plan.neither_pct}% of past cases neither level was reached within 20 sessions. Measured on ${plan.sample_n} overlapping windows of this ticker's last 2 years. ${plan.note}`));
+    `Reward:risk ${plan.risk_reward}:1 (+${plan.reward_pct}% vs −${plan.risk_pct}%). Over ${plan.sample_n} windows of the last 2 years this bracket returned ≈ ${sign(plan.gross_expectancy_pct)}/trade — but simply holding the same window returned ${sign(plan.buy_hold_pct)}, so the levels' own edge is ${sign(plan.level_edge_pct)} (${sign(plan.net_level_edge_pct)} after ${plan.cost_bps_per_side}bps/side costs). At or below zero is expected: levels manage risk, they don't create edge. ` +
+    `In ${plan.neither_pct}% of cases neither level was reached within 20 sessions. ${plan.note}`));
 }
 
 function renderComponents(c) {

@@ -6,11 +6,18 @@ and the only way the live news tilt can ever be validated.
 """
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
 
 LEDGER_PATH = Path(__file__).resolve().parents[2] / "predictions.jsonl"
+
+# Read-only mode: when set, the app serves predictions but never writes to the
+# ledger. Used by the local dashboard so the authoritative writer (the daily
+# GitHub Actions "tick") is the ONLY thing appending — the git-tracked ledger
+# then only ever changes via `git pull`, so it can never conflict or go dirty.
+READONLY = os.environ.get("STOCKPREDICT_READONLY") == "1"
 
 _lock = threading.Lock()
 _seen = None
@@ -31,7 +38,10 @@ def _keys():
 
 
 def record(entry):
-    """Append one prediction; deduped on (ticker, as_of, horizon)."""
+    """Append one prediction; deduped on (ticker, as_of, horizon).
+    No-op in read-only mode (see READONLY) so only the daily job writes."""
+    if READONLY:
+        return
     key = (entry["ticker"], entry["as_of"], entry["horizon_days"])
     with _lock:
         seen = _keys()
@@ -84,11 +94,17 @@ def resolve_records(records):
                 continue
             realized = float(close[i + h] / close[i] - 1)
             went_up = realized > 0
+            end_price = float(close[i + h])
+            lo, hi = r.get("range_low"), r.get("range_high")
+            in_band = (bool(lo <= end_price <= hi)
+                       if lo is not None and hi is not None else None)
             resolved.append({
                 **r,
                 "resolved_on": dates[i + h],
                 "realized_pct": round(realized * 100, 2),
+                "end_price": round(end_price, 4),
                 "outcome_up": went_up,
                 "correct": (r["direction"] == "up") == went_up,
+                "in_band": in_band,
             })
     return {"resolved": resolved, "pending": pending}

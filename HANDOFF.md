@@ -1,6 +1,66 @@
 # HANDOFF — session state & next steps
 
-*Last updated: 2026-07-08. Read this first when resuming work.*
+*Last updated: 2026-07-09. Read this first when resuming work.*
+
+## Session 2026-07-09 changes (newest first)
+
+Theme: the price *direction* model has no edge (proven), so this session doubled
+down on what IS predictable and on honest evaluation — without touching the
+direction blend (published backtest numbers are unchanged, verified: same 14
+features, same priors, same `_blend_price`).
+
+- **Expected-range model upgraded to EWMA + calibrated quantiles** (`app/analysis/
+  volatility.py`, new). Replaces the old `±1.34·σ₂₁·√5`. EWMA(λ=0.97) vol forecast +
+  empirically-calibrated asymmetric log-return quantiles `Z_LO_5D=-1.1372 /
+  Z_HI_5D=+1.2937`. Validated in `research/vol_backtest.py`: same ~80% coverage, ~6%
+  sharper overall / ~10% sharper in stressed regimes, ~2× flatter calm→stressed
+  calibration, LOO coverage mean 0.800 (0.775–0.828). Wired into `predictor._expected_range`.
+- **Expected-range band is now graded live.** Ledger logs `range_low`/`range_high`
+  (`predictor._assess`); `ledger.resolve_records` computes `in_band`; `/api/track-record`
+  reports realized coverage (target 0.80); the dashboard shows a "Range coverage" tile.
+  Populates as bands mature (none resolved yet as of this session).
+- **Cross-sectional signal research** (`research/cross_sectional.py`, new). Long-short
+  quintile backtest, 40 large-caps, 2016–2026, net of costs, block-bootstrap CI,
+  half-sample persistence. VERDICT: **no edge clearing the bar at 5 days.** STR dead on
+  mega-caps; 12-1 momentum has consistent positive sign (gross Sharpe ~0.45) but CI
+  straddles 0 and net Sharpe ≤ 0.16. Documented, NOT shipped (GDELT precedent). Momentum
+  is the one thing worth revisiting at a *monthly* horizon — ties into next-step #3.
+- **Evaluation-honesty fixes:**
+  - The per-ticker UI holdout graded 60 OVERLAPPING 5-day windows as if independent
+    (~12 effective). Added `effective_n`; `_confidence` now only downgrades when the
+    holdout trails baseline by > 1 SE at the effective n (was firing on noise ~half the
+    time). UI note states the effective sample.
+  - Planner expectancy was called "≈ 0" but never subtracted costs. Now computes empirical
+    gross expectancy, the buy-and-hold benchmark over the same window, and the **level edge**
+    (bracket − buy-and-hold), net of `COST_BPS_PER_SIDE=5`. The honest headline: the
+    bracket's return is mostly drift; the levels' own edge is ≤ 0 (they cap winners),
+    negative after costs. Frontend updated to show this.
+- **Infra:** `.github/workflows/ci.yml` runs the unittest suite on push/PR. Whole suite is
+  now **hermetic** (proven with DNS blocked). New hermetic `tests/test_no_lookahead.py`
+  ports the causality audit + no-peek sentinel from `backtest.py` onto synthetic data, so
+  the anti-cheat guarantee runs in CI. Tests: 12 → 26. `.gitignore` now excludes research
+  `*.pkl` caches.
+- **Always-on WITHOUT a server: GitHub Actions is now the persistence + learning layer.**
+  The Mac isn't always on, so a scheduled job replaces the always-on server for logging/
+  learning (viewing is still local). Architecture:
+  - `scripts/tick.py` — the headless equivalent of `_learning_loop`, once: snapshot the
+    watchlist (log), resolve matured, update weights. Per-ticker retries; exits non-zero
+    only if nothing logged.
+  - `.github/workflows/tick.yml` — cron `30 21 * * 1-5` (weekdays 21:30 UTC, ~1h after US
+    close) + `workflow_dispatch`. Runs the tick and **commits `predictions.jsonl` +
+    `model_state.json` back to the repo** (git history = the persistent store). Free:
+    ~3 min/run × ~22 days ≈ 66 min/mo (private free tier = 2000/mo).
+  - **Single-writer rule enforced by a read-only mode.** `STOCKPREDICT_READONLY=1` makes
+    `ledger.record` a no-op and disables the server learning loop (`ledger.READONLY`,
+    `server._start_learning`). The **LaunchAgent plist now sets this env var**, and
+    `sync.sh` sets it too — so the daily GitHub job is the ONLY writer and the tracked
+    ledger changes ONLY via `git pull`. No conflicts, no dirty tree locally. This RESOLVES
+    the earlier open decision: keep the state files tracked (they ARE the persistence).
+  - `./sync.sh` — `git pull` + serve the read-only dashboard at :8000 and open the browser.
+  - To re-arm/inspect: `gh workflow run daily-tick` (manual run); GitHub emails on failure.
+  - **To revert to Mac-only always-on:** remove `EnvironmentVariables` from the plist and
+    disable the workflow. Local server would resume writing (and can then diverge from any
+    GitHub writes — pick one writer).
 
 ## Session 2026-07-08 changes (newest first)
 
@@ -62,10 +122,12 @@ prediction ledger (`predictions.jsonl` → `/api/track-record`).
   every 6 h (logs `[learn]` lines): snapshots the watchlist (logs predictions)
   then updates weights. `backtest.py` passes frozen PRIOR_WEIGHTS so published
   backtests stay reproducible regardless of live-learned state.
-- Expected-range multiplier is **1.34** (not Gaussian 1.28) — fit for 80% coverage
-  on tune tickers, verified 80.0% on held-out tickers.
-- Confidence tiers: |p−0.5| ≥ 0.10 high, ≥ 0.05 medium, else low; capped to low
-  when the ticker's 60-session holdout loses to always-up.
+- Expected range is an **EWMA(λ=0.97) vol forecast + calibrated asymmetric quantiles**
+  (`app/analysis/volatility.py`, quantiles `-1.1372 / +1.2937`); replaced the old
+  `1.34·σ₂₁·√5` heuristic this session (see the 2026-07-09 change note). Graded live.
+- Confidence tiers: |p−0.5| ≥ 0.10 high, ≥ 0.05 medium, else low; capped to low only
+  when the ticker's 60-session holdout trails always-up by **> 1 SE** at the effective
+  (~12) non-overlapping sample size (was: any shortfall, which fired on noise).
 - UI: signal screener (20 symbols, All/High/Medium/Low toggles, per-card plan
   line) + live track record section + full per-ticker analysis page with a
   **Trade planner card** (`app/analysis/planner.py`): ATR-sized buy/limit-buy/
@@ -161,10 +223,20 @@ Key findings, so we don't re-litigate them:
    (c) the fitted +0.06/+0.08 sign was consistent across tune/validate — a hair
    of signal, worth a second look with a better feature (event counts, tone
    *change* vs level) before concluding it's exactly zero.
-3. **Multi-horizon UI**: the harness already evaluates 1d/21d; the predictor
-   only ships 5d. Add a horizon selector (1w default) reusing `_base_rates` +
-   per-horizon holdout, with the tail-clamping from finding 2 and per-horizon
-   drift honesty. Bump MODEL_VERSION and keep ledger records per horizon.
+3. **Multi-horizon UI + monthly momentum** (now the most promising direction lead):
+   the harness already evaluates 1d/21d; the predictor only ships 5d. Add a horizon
+   selector (1w default) reusing `_base_rates` + per-horizon holdout, with the
+   tail-clamping from finding 2 and per-horizon drift honesty. AND: at the *monthly*
+   horizon, revisit cross-sectional 12-1 momentum (`research/cross_sectional.py` found
+   consistent positive sign in both halves, gross Sharpe ~0.45, but CI straddled 0 on 40
+   names / 5-day). A bigger universe + monthly hold is where it's most likely to clear the
+   bar — validate long-short with block-bootstrap CI before shipping any momentum tilt.
+   For the range at other horizons, `volatility.expected_range(close, horizon_days=h)`
+   already sqrt-scales the 5-day quantiles (mild approx; recalibrate per-horizon quantiles
+   in `research/vol_backtest.py` if you ship non-5-day ranges). Bump MODEL_VERSION and keep
+   ledger records per horizon.
+3b. **CI already runs the hermetic suite** (`.github/workflows/ci.yml`, added 2026-07-09).
+   If you add network-touching tests, mock them — the suite is currently proven hermetic.
 4. **Deployment to real HTTPS** (user asked about "https kind of thing"
    originally): Render/Fly free tier; needs the ledger file on a persistent
    volume, and a cron/scheduler to hit `/api/screener` daily so the track
@@ -205,14 +277,19 @@ backtest_results.csv      7,278 graded predictions (current model)
 backtest_summary.json     pooled stats per horizon (+ edge CIs, verdicts)
 news_backtest.py          walk-forward GDELT news-tone validation (v2.2)
 news_backtest_summary.json / _rows.csv   its results
-predictions.jsonl         live ledger (append-only, deduped ticker/day)
+research/vol_backtest.py       expected-range vol validation (EWMA vs rolling, LOO)
+research/cross_sectional.py    long-short reversal/momentum study (no 5-day edge)
+.github/workflows/ci.yml       runs the hermetic unittest suite on push/PR
+predictions.jsonl         live ledger (append-only, deduped ticker/day; now logs range band)
 model_state.json          adaptive weights + update history (learner)
 HANDOFF.md                this file — keep it updated at session end
-tests/                    stdlib unittest suite (learner rails, stats, gdelt)
+tests/                    stdlib unittest suite (learner, stats, gdelt, volatility,
+                          planner, confidence, no-lookahead) — hermetic, 26 tests
 app/config.py             prior weights, tiers, watchlist, MODEL_VERSION
 app/analysis/predictor.py drift anchor, blend, holdout, analyze/snapshot
+app/analysis/volatility.py EWMA vol forecast + calibrated expected-range band
 app/analysis/learner.py   online MAP weight learning + shadow adoption test
-app/analysis/planner.py   ATR trade plans with empirical bracket odds
+app/analysis/planner.py   ATR trade plans + empirical odds + honest level edge
 app/analysis/technical.py indicators + plain-English signals
 app/analysis/sentiment.py finance-tuned VADER + recency weighting
 app/data/market.py        yfinance wrapper (history/quote/earnings/search)
