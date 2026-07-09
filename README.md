@@ -17,6 +17,11 @@ built and weighted by walk-forward backtesting, from reliable sources only:
    plus the company's own news wire, scored with a finance-tuned VADER sentiment model
    and weighted by recency. A historical GDELT backtest (see below) found no directional
    edge from company news tone, so v2.2 gives it a small, evidence-consistent weight.
+4. **Post-earnings drift (PEAD)** — the app's **one backtest-validated directional edge**.
+   When a company recently reported, the sign of its earnings surprise predicts the
+   following month's drift (57.6% hit-rate over ~2,960 events, 95% CI on the effect
+   excludes zero — see below). It's an event-driven tilt on the **monthly** view, active
+   only in the ~10 sessions after a report and fading as the drift is spent.
 
 The result is a probability, a calibrated confidence tier, and an expected price range,
 over a selectable **1-week or 1-month** horizon. The monthly view carries a stronger
@@ -150,6 +155,31 @@ they generalize, not overfit. Shipped in `app/analysis/volatility.py`. The asymm
 captures the small positive 5-day drift for free. **Every band is now graded live**: the
 ledger logs `range_low`/`range_high`, and `/api/track-record` reports the realized 80%
 coverage — the honest check that the volatility model stays calibrated out of sample.
+
+## Post-earnings drift — the one real edge (`research/pead.py`)
+
+Everything else here matches the drift baseline but doesn't beat it. PEAD does. On
+**2,957 earnings events** (30 large-caps, 2001–2026, walk-forward, enter the day *after*
+the report so the announcement jump itself is never captured), the sign of the reported
+EPS surprise predicts the **next month's drift**:
+
+| metric | result |
+|---|---|
+| directional hit-rate | **57.6%** (50% = no edge) |
+| long-short monthly drift | +1.07% gross · **+0.87% net** of 20bps |
+| signed-drift 95% CI (block-bootstrap by ticker) | **[+0.85%, +1.36%] — excludes zero** |
+| breadth | **28 of 30 tickers** individually > 50% |
+| horizon profile | 52.5% @ 1wk → 57.6% @ 1mo → 58.7% @ 2mo (drift *accrues*) |
+| persistence | +0.82% first half / +1.38% second half (same sign) |
+| dose-response | worst-surprise quintile +0.35% vs best +1.98% |
+
+This matches 40 years of academic PEAD literature and has **zero fitted parameters**
+(sign of surprise → direction), so the whole sample is already out of sample. A logistic
+fit of drift-direction on the standardized surprise gives the shipped tilt (logit +0.085
+per σ, `config.PEAD`), applied to the monthly prediction only (it's weak at a week) and
+decaying over the sessions after the report. Adding it improves the monthly Brier out of
+sample. Caveats: today's surviving large-caps; adjusted prices; Yahoo earnings history.
+Run: `.venv/bin/python research/pead.py` (needs `lxml` for the earnings table).
 
 ## Cross-sectional signal research (`research/cross_sectional.py`)
 

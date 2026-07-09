@@ -40,6 +40,19 @@ features, same priors, same `_blend_price`).
   ports the causality audit + no-peek sentinel from `backtest.py` onto synthetic data, so
   the anti-cheat guarantee runs in CI. Tests: 12 → 26. `.gitignore` now excludes research
   `*.pkl` caches.
+- **PEAD shipped — the app's FIRST validated directional edge.** `research/pead.py`:
+  on 2,957 earnings events (30 large-caps, 2001-2026, enter day *after* the report), the
+  EPS-surprise sign predicts the next month's drift — 57.6% hit, +0.87% net long-short,
+  signed-drift 95% CI [+0.85%,+1.36%] EXCLUDES 0, 28/30 tickers, monotonic, robust across
+  halves, horizon profile 52.5%@1wk→58.7%@2mo (matches the literature). Zero fitted
+  params → whole sample is OOS. Shipped as an event-driven MONTHLY-only tilt
+  (`config.PEAD` coef 0.085/σ; `predictor._pead_tilt`; `market.get_recent_earnings`, needs
+  **lxml** — added to requirements). Active only ≤10 sessions post-report, decaying;
+  clips the raw Surprise(%) (wild outliers, e.g. NKE +466%) before standardizing. Weekly
+  is untouched (no earnings fetch → still bit-identical/fast). UI shows a "Post-earnings
+  drift" driver row + plain-English note when active. Improves monthly Brier OOS. NOT yet
+  live-tracked (monthly isn't logged) — the strong backtest is the validation; live
+  tracking of PEAD-active monthly calls is a possible follow-up. Tests +7 (test_pead.py).
 - **Multi-horizon (weekly + monthly) prediction view.** `config.HORIZONS` = {1w:5,
   1m:21}, `DEFAULT_HORIZON="1w"`. The predictor is now horizon-parameterized
   (`_price_model(ind, h)`, `_expected_range(ind, h)`, `_assess(ticker, h)`,
@@ -294,6 +307,7 @@ news_backtest.py          walk-forward GDELT news-tone validation (v2.2)
 news_backtest_summary.json / _rows.csv   its results
 research/vol_backtest.py       expected-range vol validation (EWMA vs rolling, LOO)
 research/cross_sectional.py    long-short reversal/momentum study (no 5-day edge)
+research/pead.py               post-earnings-drift study (THE validated edge; monthly tilt)
 .github/workflows/ci.yml       runs the hermetic unittest suite on push/PR
 predictions.jsonl         live ledger (append-only, deduped ticker/day; now logs range band)
 model_state.json          adaptive weights + update history (learner)

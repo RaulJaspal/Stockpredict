@@ -1,5 +1,6 @@
 """Market data via Yahoo Finance (yfinance) with light caching."""
 
+import bisect
 import datetime as _dt
 
 import pandas as pd
@@ -101,6 +102,46 @@ def get_next_earnings(ticker):
             return ""
 
     return cached(("earnings", ticker.upper()), CACHE_TTL["info"], fetch) or None
+
+
+def get_recent_earnings(ticker):
+    """Most recent PAST earnings report with its EPS surprise and how many
+    trading sessions ago it landed — the input to the PEAD tilt (predictor).
+    Returns {date, surprise_pct, sessions_ago} or None. Cached (earnings history
+    changes only quarterly). Needs lxml (yfinance parses the earnings table)."""
+    def fetch():
+        try:
+            ed = yf.Ticker(ticker).get_earnings_dates(limit=8)
+        except Exception:
+            return None                          # transient/parse failure -> retry later
+        if ed is None or ed.empty:
+            return {}                            # cache "checked, none" (don't retry)
+        try:
+            idx_dates = list(get_history(ticker).index.strftime("%Y-%m-%d"))
+        except LookupError:
+            return {}
+        if not idx_dates:
+            return {}
+        last_date = idx_dates[-1]
+        best = None
+        for edate, row in ed.iterrows():
+            ds = edate.strftime("%Y-%m-%d")
+            if ds > last_date:                   # future / not-yet-reported (ISO strings sort chronologically)
+                continue
+            surprise = row.get("Surprise(%)")
+            if pd.isna(surprise):
+                continue
+            pos = bisect.bisect_left(idx_dates, ds)   # first trading day >= report date
+            if pos >= len(idx_dates):
+                continue
+            sessions_ago = len(idx_dates) - 1 - pos
+            if best is None or sessions_ago < best["sessions_ago"]:
+                best = {"date": ds, "surprise_pct": round(float(surprise), 2),
+                        "sessions_ago": int(sessions_ago)}
+        return best or {}
+
+    result = cached(("recent_earn", ticker.upper()), CACHE_TTL["info"], fetch)
+    return result or None
 
 
 def search_symbols(query):

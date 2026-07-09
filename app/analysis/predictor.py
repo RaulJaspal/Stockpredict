@@ -28,7 +28,7 @@ from sklearn.preprocessing import StandardScaler
 
 from ..config import (BLEND, CONFIDENCE, DEFAULT_HORIZON, HALF_LIFE_COMPANY,
                       HALF_LIFE_MACRO, HOLDOUT_DAYS, HORIZON_DAYS, HORIZONS,
-                      MIN_ROWS_FOR_ML, MODEL, MODEL_VERSION)
+                      MIN_ROWS_FOR_ML, MODEL, MODEL_VERSION, PEAD)
 from ..data import ledger, market, news
 from . import learner, planner, sentiment, technical, volatility
 
@@ -191,6 +191,34 @@ def _confidence(p_up, holdout):
     return level, caveat
 
 
+def _pead_tilt(ticker, h):
+    """Post-earnings-drift tilt for the given horizon. Returns (logit_tilt, info).
+
+    Event-driven and MONTHLY-only: it fires only for a longer-than-weekly horizon
+    and only in the ~10 sessions after an earnings report (the drift is weak at a
+    week and accrues over 20-60 sessions — see research/pead.py). The tilt is
+    coef * standardized_surprise, decaying linearly to zero over the window.
+    Never raises: any data problem just yields no tilt.
+    """
+    if h <= HORIZON_DAYS:                         # weekly (default) gets no PEAD
+        return 0.0, None
+    try:
+        e = market.get_recent_earnings(ticker)
+    except Exception:
+        e = None
+    if not e:
+        return 0.0, None
+    decay = 1.0 - e["sessions_ago"] / PEAD["active_sessions"]
+    if decay <= 0:                                # report too old — drift already spent
+        return 0.0, {**e, "active": False}
+    clipped = max(-PEAD["surprise_clip"], min(PEAD["surprise_clip"], e["surprise_pct"]))
+    z = (clipped - PEAD["surprise_mean"]) / PEAD["surprise_std"]
+    z = max(-PEAD["z_clip"], min(PEAD["z_clip"], z))
+    tilt = PEAD["coef"] * z * decay
+    return tilt, {**e, "active": True, "tilt": round(tilt, 4),
+                  "direction": "up" if tilt >= 0 else "down"}
+
+
 def _assess(ticker, h=HORIZON_DAYS):
     """Shared core: everything needed for both the full analysis and a
     screener snapshot, computed once for an h-session horizon."""
@@ -215,6 +243,8 @@ def _assess(ticker, h=HORIZON_DAYS):
     logit += W["news_company"] * s_company["score"]
     logit += W["news_market"] * s_market["score"]
     logit += W["news_politics"] * s_politics["score"]
+    pead_tilt, pead = _pead_tilt(quote["ticker"], h)   # monthly-only earnings drift
+    logit += pead_tilt
     p_up = float(np.clip(_sigmoid(logit), 0.05, 0.95))
 
     confidence, caveat = _confidence(p_up, pm["holdout"])
@@ -257,6 +287,7 @@ def _assess(ticker, h=HORIZON_DAYS):
         "pm": pm,
         "p_up": p_up,
         "horizon_days": h,
+        "pead": pead,
         "confidence": confidence,
         "caveat": caveat,
         "expected_range": expected_range,
@@ -287,6 +318,7 @@ def _components_payload(a):
                      if pm["p_ml"] is not None else None),
         "technical": {"score": round(a["tech_score"], 3),
                       "label": sentiment.label(a["tech_score"])},
+        "pead": a.get("pead"),
         "news_company": a["sentiments"]["company"],
         "news_market": a["sentiments"]["market"],
         "news_politics": a["sentiments"]["politics"],

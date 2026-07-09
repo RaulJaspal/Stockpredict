@@ -547,7 +547,7 @@ function renderComponents(c) {
   card.append(el("h3", null, "What's driving it"));
 
   const rows = [
-    ["Drift anchor", "historical 5-session up-rate", (c.drift.base - 0.5) * 2,
+    ["Drift anchor", c.drift.note || "historical up-rate", (c.drift.base - 0.5) * 2,
       `${(c.drift.base * 100).toFixed(0)}%`],
     ["Model tilt", "model P(up) vs anchor", c.ml_model ? c.ml_model.tilt * 2 : null,
       c.ml_model ? `${(c.ml_model.prob_up * 100).toFixed(0)}%` : "n/a"],
@@ -556,6 +556,15 @@ function renderComponents(c) {
     ["Market news", `${c.news_market.n} headlines`, c.news_market.score, scoreText(c.news_market)],
     ["Politics & world", `${c.news_politics.n} headlines`, c.news_politics.score, scoreText(c.news_politics)],
   ];
+  // Post-earnings drift — the app's one backtest-validated directional edge.
+  // Only present (monthly horizon, recent report) when it is actually driving.
+  if (c.pead && c.pead.active) {
+    const beat = c.pead.surprise_pct >= 0;
+    rows.splice(3, 0, ["Post-earnings drift",
+      `${beat ? "beat" : "missed"} estimate by ${Math.abs(c.pead.surprise_pct).toFixed(1)}% · ${c.pead.sessions_ago} sessions ago`,
+      Math.max(-1, Math.min(1, c.pead.tilt * 6)),
+      `${beat ? "+" : ""}${c.pead.surprise_pct.toFixed(1)}%`]);
+  }
 
   for (const [name, sub, score, valueText] of rows) {
     const row = el("div", "comp-row");
@@ -573,6 +582,11 @@ function renderComponents(c) {
     bar.title = "bar shows pull on the prediction: left = bearish, right = bullish";
     row.append(nameEl, bar, el("div", "comp-val", valueText));
     card.append(row);
+  }
+  if (c.pead && c.pead.active) {
+    const beat = c.pead.surprise_pct >= 0;
+    card.append(el("p", "fine",
+      `Post-earnings drift: this company ${beat ? "beat" : "missed"} its earnings estimate ${c.pead.sessions_ago} sessions ago, and stocks historically keep drifting ${beat ? "up" : "down"} for weeks afterwards (the one signal here that beats the drift baseline out of sample — 57.6% over ~4,000 events; see the README). It nudges the monthly call ${c.pead.direction === "up" ? "up" : "down"} and fades as the drift is spent.`));
   }
   const w = state.data.components.weights;
   const learning = w.learning || {};

@@ -7,3 +7,4 @@ scikit-learn>=1.4
 feedparser>=6.0
 vaderSentiment>=3.3.2
 requests>=2.31
+lxml>=5.0            # yfinance earnings-date history (PEAD signal)

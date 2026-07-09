@@ -78,6 +78,25 @@ BLEND = {
     "news_politics":  0.05,   # politics & world-affairs sentiment
 }
 
+# Post-earnings-announcement drift (PEAD) — the first validated directional edge
+# in this app. On 2,957 earnings events (30 large-caps, 2001-2026, see
+# research/pead.py) the sign of the EPS surprise predicts the following month's
+# drift: 57.6% hit-rate, +0.87% net-of-cost long-short, signed-drift 95% CI
+# [+0.85%, +1.36%] EXCLUDES ZERO, broad (28/30 tickers), monotonic, robust across
+# halves. A logistic fit of 21-day drift direction on the standardized surprise
+# gives the tilt (logit space). Applied to the MONTHLY prediction only (it is
+# weak at a week — the drift accrues over 20-60 sessions), decaying over the
+# sessions after the report. Raw Surprise(%) is clipped before standardizing
+# because it has wild outliers (std ~212% when the estimate is near zero).
+PEAD = {
+    "coef": 0.085,            # logit tilt per 1 std of standardized surprise
+    "surprise_clip": 20.0,    # clip raw Surprise(%) to +/- this before standardizing
+    "surprise_mean": 5.3387,  # mean/std of the clipped surprise (calibration set)
+    "surprise_std": 8.7637,
+    "z_clip": 3.0,            # clip the standardized surprise to +/- this
+    "active_sessions": 10,    # tilt decays linearly to 0 over this many sessions post-report
+}
+
 # Confidence tiers, calibrated on the walk-forward backtest: historically,
 # calls with |p - 0.5| >= 0.10 were right ~67% of the time, ~55% below 0.05.
 CONFIDENCE = {"medium": 0.05, "high": 0.10}
