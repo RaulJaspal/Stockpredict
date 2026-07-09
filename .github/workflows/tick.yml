@@ -5,7 +5,11 @@ name: daily-tick
 # ledger + weights back to the repo (the git history is the persistent store).
 on:
   schedule:
-    - cron: "30 21 * * 1-5"     # 21:30 UTC, Mon-Fri (~1h after US market close)
+    - cron: "30 21 * * 1-5"     # primary: 21:30 UTC, Mon-Fri (~1h after US close)
+    - cron: "30 23 * * 1-5"     # backup:  23:30 UTC — recovers a failed primary
+                                 #          the same day; a harmless no-op if the
+                                 #          primary already logged (dedup -> nothing
+                                 #          to commit).
   workflow_dispatch: {}          # also lets you (or Claude) trigger a run by hand
 
 # Never let two ticks run at once (they'd both push and race).
