@@ -38,9 +38,9 @@ def _clean(obj):
 
 
 @app.get("/api/predict/{ticker}")
-def predict(ticker: str):
+def predict(ticker: str, horizon: str = Query("1w")):
     try:
-        return _clean(predictor.analyze(ticker.strip()))
+        return _clean(predictor.analyze(ticker.strip(), horizon))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

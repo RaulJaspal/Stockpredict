@@ -25,14 +25,31 @@ import numpy as np
 EWMA_LAMBDA = 0.97      # RiskMetrics-style decay; ~33-session effective memory
 EWMA_SEED = 21          # observations used to seed the variance recursion
 
-# Empirically-calibrated quantiles of the standardized 5-day log return
-#   z = log(P_{t+5} / P_t) / (sigma_daily * sqrt(5)),
+# Empirically-calibrated quantiles of the standardized h-day log return
+#   z = log(P_{t+h} / P_t) / (sigma_daily * sqrt(h)),
 # pooled across 15 tickers, 10y. The 10th/90th percentiles bound an 80% central
-# interval; the asymmetry (|hi| > |lo|) encodes the small positive 5-day drift.
-# Frozen constants, exactly like the 1.34 multiplier they replace.
-Z_LO_5D = -1.1372
-Z_HI_5D = 1.2937
-_CAL_HORIZON = 5        # the horizon these quantiles were calibrated for
+# interval; the asymmetry (|hi| > |lo|) encodes the positive drift, which grows
+# with the horizon (a month compounds more upside than a week). Calibrated
+# per-horizon — the 5-day numbers do NOT simply sqrt-scale to a month.
+# See research/vol_backtest.py.
+_QUANTILES = {
+    5:  (-1.1372, 1.2937),    # weekly
+    21: (-1.1089, 1.4462),    # monthly
+}
+_CAL_HORIZON = 5
+# Back-compat aliases (the 5-day constants other modules/tests may import).
+Z_LO_5D, Z_HI_5D = _QUANTILES[5]
+
+
+def _quantiles_for(horizon_days):
+    """Calibrated (lo, hi) for a horizon; falls back to sqrt-scaling the nearest
+    calibrated horizon for anything not directly calibrated."""
+    if horizon_days in _QUANTILES:
+        return _QUANTILES[horizon_days]
+    base_h = min(_QUANTILES, key=lambda h: abs(h - horizon_days))
+    lo, hi = _QUANTILES[base_h]
+    scale = np.sqrt(horizon_days / base_h)
+    return lo * scale, hi * scale
 
 
 def ewma_daily_vol(log_returns):
@@ -56,9 +73,8 @@ def expected_range(close, horizon_days=_CAL_HORIZON):
     `close` is a 1-D sequence of adjusted closes (most recent last). Returns
     {low, high, pct, sigma_annual_pct} or None when history is too short.
 
-    The quantiles are calibrated for the 5-session horizon; for other horizons
-    they are scaled by sqrt(t) (a mild approximation the app does not currently
-    exercise, since it ships 5-day only).
+    Quantiles are calibrated per horizon (weekly and monthly directly; other
+    horizons sqrt-scale the nearest calibrated one — see _quantiles_for).
     """
     prices = np.asarray(close, dtype=float)
     prices = prices[np.isfinite(prices) & (prices > 0)]
@@ -69,10 +85,10 @@ def expected_range(close, horizon_days=_CAL_HORIZON):
     if sigma_d is None:
         return None
 
+    q_lo, q_hi = _quantiles_for(horizon_days)
     s = sigma_d * np.sqrt(horizon_days)
-    scale = np.sqrt(horizon_days / _CAL_HORIZON)   # 1.0 for the shipped 5-day
-    low = spot * np.exp(Z_LO_5D * scale * s)
-    high = spot * np.exp(Z_HI_5D * scale * s)
+    low = spot * np.exp(q_lo * s)
+    high = spot * np.exp(q_hi * s)
     return {
         "low": round(float(low), 2),
         "high": round(float(high), 2),

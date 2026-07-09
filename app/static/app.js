@@ -9,6 +9,7 @@ const state = {
   data: null,        // /api/predict payload
   candles: [],       // /api/history payload (500 sessions)
   rangeDays: 126,
+  horizon: "1w",     // prediction horizon: "1w" (weekly, tracked) or "1m" (monthly view)
   newsTab: "company",
   chart: null,
   series: null,
@@ -360,7 +361,7 @@ async function analyze(ticker) {
   }
   try {
     const [data, hist] = await Promise.all([
-      fetchJSON(`/api/predict/${encodeURIComponent(ticker)}`),
+      fetchJSON(`/api/predict/${encodeURIComponent(ticker)}?horizon=${state.horizon}`),
       fetchJSON(`/api/history/${encodeURIComponent(ticker)}?days=500`),
     ]);
     state.ticker = data.quote.ticker;
@@ -413,6 +414,30 @@ function renderPrediction(data) {
   const card = $("#prediction-card");
   card.replaceChildren();
   card.append(el("h3", null, `Prediction — next ${p.horizon_days} trading sessions`));
+
+  // Horizon selector (weekly / monthly). Longer horizons carry a stronger drift
+  // anchor (higher raw hit-rate) and their own calibrated range.
+  const hz = data.horizon;
+  if (hz && hz.options && hz.options.length > 1) {
+    const row = el("div", "hz-row");
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", "Prediction horizon");
+    for (const opt of hz.options) {
+      const b = el("button", null, opt.label);
+      b.setAttribute("aria-pressed", String(opt.key === hz.key));
+      b.addEventListener("click", () => {
+        if (opt.key === state.horizon) return;
+        state.horizon = opt.key;
+        analyze(state.ticker);
+      });
+      row.append(b);
+    }
+    card.append(row);
+    if (hz.key !== "1w") {
+      card.append(el("div", "hz-note",
+        "Monthly is a view — the live track record grades the weekly call."));
+    }
+  }
 
   const up = p.direction === "up";
   const top = el("div", "pred-top");

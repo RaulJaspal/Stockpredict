@@ -26,9 +26,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from ..config import (BLEND, CONFIDENCE, HALF_LIFE_COMPANY, HALF_LIFE_MACRO,
-                      HOLDOUT_DAYS, HORIZON_DAYS, MIN_ROWS_FOR_ML, MODEL,
-                      MODEL_VERSION)
+from ..config import (BLEND, CONFIDENCE, DEFAULT_HORIZON, HALF_LIFE_COMPANY,
+                      HALF_LIFE_MACRO, HOLDOUT_DAYS, HORIZON_DAYS, HORIZONS,
+                      MIN_ROWS_FOR_ML, MODEL, MODEL_VERSION)
 from ..data import ledger, market, news
 from . import learner, planner, sentiment, technical, volatility
 
@@ -98,27 +98,31 @@ def _blend_price(p_ml, base, tech_score, weights=None):
     return _sigmoid(x)
 
 
-def _price_model(ind):
-    """Drift anchor + ML tilt + an honest holdout of the blended output.
+def _price_model(ind, h=HORIZON_DAYS):
+    """Drift anchor + ML tilt + an honest holdout of the blended output, for an
+    h-session horizon.
 
     Returns {base, p_ml, holdout} — p_ml/holdout are None when there is not
     enough clean feature history (the app then runs drift + technicals only).
     """
     close_v = ind["Close"].to_numpy(dtype=float)
     n = len(close_v)
-    base_at = _base_rates(close_v, HORIZON_DAYS)
+    base_at = _base_rates(close_v, h)
     base = float(base_at[-1]) if np.isfinite(base_at[-1]) else 0.5
     out = {"base": round(base, 3), "p_ml": None, "holdout": None}
 
     features = _feature_frame(ind)
     X = features.to_numpy(dtype=float)
     finite = ~np.isnan(X).any(axis=1)
-    labeled = [i for i in range(n - HORIZON_DAYS) if finite[i]]
+    labeled = [i for i in range(n - h) if finite[i]]
     if len(labeled) < MIN_ROWS_FOR_ML + 20 or not finite[n - 1]:
         return out
 
-    y = (close_v[np.array(labeled) + HORIZON_DAYS] > close_v[np.array(labeled)]).astype(int)
-    holdout_n = min(HOLDOUT_DAYS, len(labeled) // 4)
+    y = (close_v[np.array(labeled) + h] > close_v[np.array(labeled)]).astype(int)
+    # Scale the holdout with the horizon so longer horizons still get a usable
+    # number of (near-)independent windows (~12 * h sessions targets ~12 of
+    # them), capped at a third of the data so enough training rows remain.
+    holdout_n = min(max(HOLDOUT_DAYS, 12 * h), len(labeled) // 3)
     train_pos, test_pos = labeled[:-holdout_n], labeled[-holdout_n:]
     y_train, y_test = y[:-holdout_n], y[-holdout_n:]
 
@@ -147,7 +151,7 @@ def _price_model(ind):
         "hit_rate": round(float(np.mean(correct)), 3),
         "baseline": round(float(np.mean(y_test)), 3),   # always-up accuracy
         "holdout_days": int(holdout_n),
-        "effective_n": max(1, int(holdout_n // HORIZON_DAYS)),   # non-overlapping equiv.
+        "effective_n": max(1, int(holdout_n // h)),      # non-overlapping equiv.
         "train_rows": int(len(train_pos)),
     }
 
@@ -157,13 +161,13 @@ def _price_model(ind):
     return out
 
 
-def _expected_range(ind):
-    """~80% price band over the horizon from an EWMA volatility forecast and
-    empirically-calibrated fat-tailed quantiles (analysis/volatility.py).
+def _expected_range(ind, h=HORIZON_DAYS):
+    """~80% price band over the h-session horizon from an EWMA volatility
+    forecast and empirically-calibrated fat-tailed quantiles (volatility.py).
     Replaces the old 21-day-rolling × 1.34 heuristic: same 80% coverage, but
     sharper and far better calibrated across calm/stressed regimes (validated
     walk-forward, LOO coverage 0.800; see research/vol_backtest.py)."""
-    return volatility.expected_range(ind["Close"].to_numpy(dtype=float), HORIZON_DAYS)
+    return volatility.expected_range(ind["Close"].to_numpy(dtype=float), h)
 
 
 def _confidence(p_up, holdout):
@@ -187,14 +191,14 @@ def _confidence(p_up, holdout):
     return level, caveat
 
 
-def _assess(ticker):
+def _assess(ticker, h=HORIZON_DAYS):
     """Shared core: everything needed for both the full analysis and a
-    screener snapshot, computed once."""
+    screener snapshot, computed once for an h-session horizon."""
     df = market.get_history(ticker)
     quote = market.get_quote(ticker)
     ind = technical.compute_indicators(df)
     tech_score, signals = technical.technical_signals(ind)
-    pm = _price_model(ind)
+    pm = _price_model(ind, h)
 
     company_news = sentiment.annotate(news.get_ticker_news(ticker, quote["name"]))
     macro_news = sentiment.annotate(news.get_macro_news())
@@ -214,34 +218,36 @@ def _assess(ticker):
     p_up = float(np.clip(_sigmoid(logit), 0.05, 0.95))
 
     confidence, caveat = _confidence(p_up, pm["holdout"])
-    expected_range = _expected_range(ind)
+    expected_range = _expected_range(ind, h)
 
     # Log to the live ledger (deduped per ticker/day) so /api/track-record can
     # grade this prediction against reality once the horizon matures — both the
-    # direction call AND the expected-range band (in_band coverage should run
-    # ~80% if the volatility model is honestly calibrated live).
-    try:
-        ledger.record({
-            "model_version": MODEL_VERSION,
-            "ticker": quote["ticker"],
-            "as_of": quote["as_of"],
-            "horizon_days": HORIZON_DAYS,
-            "price": quote["price"],
-            "p_up": round(p_up, 4),
-            "direction": "up" if p_up >= 0.5 else "down",
-            "confidence": confidence,
-            "base": pm["base"],
-            "p_ml": pm["p_ml"],
-            "tech": round(tech_score, 3),
-            "news_company": s_company["score"],
-            "news_market": s_market["score"],
-            "news_politics": s_politics["score"],
-            "range_low": expected_range["low"] if expected_range else None,
-            "range_high": expected_range["high"] if expected_range else None,
-            "weights": {k: round(v, 3) for k, v in W.items()},
-        })
-    except OSError:
-        pass  # a read-only disk must never break predictions
+    # direction call AND the expected-range band. Only the DEFAULT horizon is
+    # logged, so the live track record stays a single clean weekly test; longer
+    # horizons are a view (they carry their own on-page holdout backtest).
+    if h == HORIZON_DAYS:
+        try:
+            ledger.record({
+                "model_version": MODEL_VERSION,
+                "ticker": quote["ticker"],
+                "as_of": quote["as_of"],
+                "horizon_days": h,
+                "price": quote["price"],
+                "p_up": round(p_up, 4),
+                "direction": "up" if p_up >= 0.5 else "down",
+                "confidence": confidence,
+                "base": pm["base"],
+                "p_ml": pm["p_ml"],
+                "tech": round(tech_score, 3),
+                "news_company": s_company["score"],
+                "news_market": s_market["score"],
+                "news_politics": s_politics["score"],
+                "range_low": expected_range["low"] if expected_range else None,
+                "range_high": expected_range["high"] if expected_range else None,
+                "weights": {k: round(v, 3) for k, v in W.items()},
+            })
+        except OSError:
+            pass  # a read-only disk must never break predictions
 
     return {
         "quote": quote,
@@ -250,6 +256,7 @@ def _assess(ticker):
         "tech_score": tech_score,
         "pm": pm,
         "p_up": p_up,
+        "horizon_days": h,
         "confidence": confidence,
         "caveat": caveat,
         "expected_range": expected_range,
@@ -261,7 +268,7 @@ def _assess(ticker):
 
 def _prediction_payload(a):
     return {
-        "horizon_days": HORIZON_DAYS,
+        "horizon_days": a["horizon_days"],
         "direction": "up" if a["p_up"] >= 0.5 else "down",
         "prob_up": round(a["p_up"], 3),
         "confidence": a["confidence"],
@@ -275,7 +282,7 @@ def _components_payload(a):
     pm = a["pm"]
     return {
         "drift": {"base": pm["base"],
-                  "note": f"historical {HORIZON_DAYS}-session up-rate (the anchor)"},
+                  "note": f"historical {a['horizon_days']}-session up-rate (the anchor)"},
         "ml_model": ({"prob_up": pm["p_ml"], "tilt": round(pm["p_ml"] - pm["base"], 3)}
                      if pm["p_ml"] is not None else None),
         "technical": {"score": round(a["tech_score"], 3),
@@ -290,12 +297,17 @@ def _components_payload(a):
     }
 
 
-def analyze(ticker):
-    """Full payload for the analysis page."""
-    a = _assess(ticker)
+def analyze(ticker, horizon=DEFAULT_HORIZON):
+    """Full payload for the analysis page, for the chosen horizon key
+    ('1w'/'1m'). Unknown keys fall back to the default."""
+    h = HORIZONS.get(horizon, HORIZONS[DEFAULT_HORIZON])["days"]
+    a = _assess(ticker, h)
     holdout = a["pm"]["holdout"]
     return {
         "quote": a["quote"],
+        "horizon": {"key": horizon if horizon in HORIZONS else DEFAULT_HORIZON,
+                    "days": h,
+                    "options": [{"key": k, "label": v["label"]} for k, v in HORIZONS.items()]},
         "prediction": _prediction_payload(a),
         "components": _components_payload(a),
         "trade_plan": a["trade_plan"],
@@ -303,9 +315,9 @@ def analyze(ticker):
         "backtest": ({
             **holdout,
             "note": ("Hit-rate of this exact blend on the most recent {} sessions it never "
-                     "trained on, vs. always predicting up. The 5-day windows overlap, so "
+                     "trained on, vs. always predicting up. The {}-day windows overlap, so "
                      "this is only ~{} independent tests — indicative, not decisive."
-                     ).format(holdout["holdout_days"], holdout["effective_n"]),
+                     ).format(holdout["holdout_days"], h, holdout["effective_n"]),
         } if holdout else None),
         "news": {k: v[:12] for k, v in a["news_lists"].items()},
         "earnings_date": market.get_next_earnings(ticker),

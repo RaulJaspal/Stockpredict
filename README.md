@@ -18,11 +18,17 @@ built and weighted by walk-forward backtesting, from reliable sources only:
    and weighted by recency. A historical GDELT backtest (see below) found no directional
    edge from company news tone, so v2.2 gives it a small, evidence-consistent weight.
 
-The result is a probability, a calibrated confidence tier, and an expected 5-day price
-range. The range is the app's most *predictable* output — direction at short horizons is
-near-random, but volatility is strongly autocorrelated — so it is forecast with an EWMA
-(RiskMetrics λ=0.97) volatility model and empirically-calibrated fat-tailed quantiles,
-and its live coverage is tracked in the track record (see below).
+The result is a probability, a calibrated confidence tier, and an expected price range,
+over a selectable **1-week or 1-month** horizon. The monthly view carries a stronger
+drift anchor, so it is higher-accuracy in raw hit-rate (~58% vs ~57% weekly in the
+backtest) — though the *edge over the drift baseline* stays ≈zero at every horizon; it is
+more accurate, not more skillful. The range is the app's most *predictable* output —
+direction at short horizons is near-random, but volatility is strongly autocorrelated —
+so it is forecast with an EWMA (RiskMetrics λ=0.97) volatility model and
+empirically-calibrated fat-tailed quantiles (calibrated per horizon), and its live
+coverage is tracked in the track record (see below). Only the weekly call is logged to
+the live ledger, so the track record stays a single clean test; the monthly view carries
+its own on-page holdout backtest.
 
 ## Quick start
 

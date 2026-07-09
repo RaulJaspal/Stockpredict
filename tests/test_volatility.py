@@ -52,6 +52,22 @@ class ExpectedRangeTest(unittest.TestCase):
     def test_none_on_short_series(self):
         self.assertIsNone(volatility.expected_range(np.array([100.0, 101.0, 102.0])))
 
+    def test_per_horizon_quantiles(self):
+        # Weekly and monthly are directly calibrated; an uncalibrated horizon
+        # sqrt-scales the nearest one.
+        self.assertEqual(volatility._quantiles_for(5), volatility._QUANTILES[5])
+        self.assertEqual(volatility._quantiles_for(21), volatility._QUANTILES[21])
+        lo10, hi10 = volatility._quantiles_for(10)      # not calibrated -> scale from 5
+        scale = (10 / 5) ** 0.5
+        self.assertAlmostEqual(lo10, volatility._QUANTILES[5][0] * scale, places=6)
+        self.assertAlmostEqual(hi10, volatility._QUANTILES[5][1] * scale, places=6)
+
+    def test_monthly_band_wider_than_weekly(self):
+        prices = _gbm(0.02, 800, seed=11)
+        wk = volatility.expected_range(prices, horizon_days=5)
+        mo = volatility.expected_range(prices, horizon_days=21)
+        self.assertGreater(mo["high"] - mo["low"], wk["high"] - wk["low"])
+
     def test_coverage_is_calibrated(self):
         # On a driftless known-vol process the shipped 80% band should cover
         # ~80% of realized 5-day moves out of sample (allow generous slack).

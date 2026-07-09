@@ -35,10 +35,21 @@ INDICES = [
 # ---------------------------------------------------------------------------
 # Prediction model
 # ---------------------------------------------------------------------------
-HORIZON_DAYS = 5          # predict direction over the next 5 trading sessions
+HORIZON_DAYS = 5          # DEFAULT horizon (weekly); the tracked/learned one
 HOLDOUT_DAYS = 60         # honest out-of-sample window for the backtest
 MIN_ROWS_FOR_ML = 150     # below this, fall back to drift + technicals only
 HISTORY_PERIOD = "2y"
+
+# Selectable prediction horizons. The default (weekly) is the one the live
+# ledger logs and the online learner adapts on. Longer horizons are offered as
+# a VIEW: they carry a stronger drift anchor (higher raw hit-rate — ~58% at a
+# month vs ~57% at a week in the walk-forward backtest) and their own calibrated
+# range, but are not auto-logged, so the track record stays a clean weekly test.
+HORIZONS = {
+    "1w": {"days": 5,  "label": "1 week"},
+    "1m": {"days": 21, "label": "1 month"},
+}
+DEFAULT_HORIZON = "1w"
 
 # Drift-anchored blend, validated by walk-forward backtest (see backtest.py).
 # The probability is built around the ticker's historical up-rate ("drift

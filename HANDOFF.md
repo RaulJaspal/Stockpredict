@@ -40,6 +40,21 @@ features, same priors, same `_blend_price`).
   ports the causality audit + no-peek sentinel from `backtest.py` onto synthetic data, so
   the anti-cheat guarantee runs in CI. Tests: 12 → 26. `.gitignore` now excludes research
   `*.pkl` caches.
+- **Multi-horizon (weekly + monthly) prediction view.** `config.HORIZONS` = {1w:5,
+  1m:21}, `DEFAULT_HORIZON="1w"`. The predictor is now horizon-parameterized
+  (`_price_model(ind, h)`, `_expected_range(ind, h)`, `_assess(ticker, h)`,
+  `analyze(ticker, horizon)`); `/api/predict/{t}?horizon=1w|1m`; UI has a 1w/1m toggle
+  in the prediction card. Monthly carries a stronger drift anchor → higher raw hit-rate
+  (~58% vs ~57% weekly in the backtest), and its OWN calibrated range quantiles
+  (`volatility._QUANTILES` = {5:(-1.1372,1.2937), 21:(-1.1089,1.4462)} — a month
+  compounds more upside; do NOT sqrt-scale the 5-day). Holdout window scales with the
+  horizon (`min(max(60, 12*h), len//3)`) so monthly gets ~6 effective windows not ~2.
+  **Only the DEFAULT (weekly) horizon is logged to the ledger** (`_assess` guards on
+  `h == HORIZON_DAYS`), so the live track record stays a single clean weekly test;
+  monthly is a view with its own on-page holdout backtest. Weekly predictions are
+  bit-identical to before (holdout_n doesn't affect p_up/base) → MODEL_VERSION unchanged,
+  track-record continuity preserved. Edge is still ≈zero at every horizon — monthly is
+  more *accurate* (drift), not skillful.
 - **Always-on WITHOUT a server: GitHub Actions is now the persistence + learning layer.**
   The Mac isn't always on, so a scheduled job replaces the always-on server for logging/
   learning (viewing is still local). Architecture:
