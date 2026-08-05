@@ -35,6 +35,11 @@ coverage is tracked in the track record (see below). Only the weekly call is log
 the live ledger, so the track record stays a single clean test; the monthly view carries
 its own on-page holdout backtest.
 
+> **Not financial advice.** This is a research project. Every number it produces is a
+> statistical estimate with real uncertainty, published together with its own
+> out-of-sample track record — including where it has *no* edge. Nothing here is a
+> recommendation to buy or sell any security. No warranty of any kind.
+
 ## Quick start
 
 ```bash
