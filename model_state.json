@@ -7,23 +7,9 @@
     "news_politics": 0.05
   },
   "source": "prior (candidate rejected by shadow test)",
-  "n_used": 3055,
-  "updated_at": "2026-10-10 02:28",
+  "n_used": 3105,
+  "updated_at": "2026-10-13 02:39",
   "history": [
-    {
-      "at": "2026-09-07 23:38",
-      "n": 1878,
-      "adopted": true,
-      "brier_candidate": 0.2483,
-      "brier_prior": 0.2514,
-      "weights": {
-        "k_ml": 0.0,
-        "tech": 0.0,
-        "news_company": 0.0,
-        "news_market": 0.1651,
-        "news_politics": 0.1824
-      }
-    },
     {
       "at": "2026-09-08 01:16",
       "n": 1878,
@@ -702,6 +688,20 @@
       "adopted": false,
       "brier_candidate": 0.2455,
       "brier_prior": 0.2421,
+      "weights": {
+        "k_ml": 0.15,
+        "tech": 0.1,
+        "news_company": 0.15,
+        "news_market": 0.08,
+        "news_politics": 0.05
+      }
+    },
+    {
+      "at": "2026-10-13 02:39",
+      "n": 3105,
+      "adopted": false,
+      "brier_candidate": 0.2478,
+      "brier_prior": 0.2423,
       "weights": {
         "k_ml": 0.15,
         "tech": 0.1,
