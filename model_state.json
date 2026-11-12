@@ -1,29 +1,15 @@
 {
   "weights": {
-    "k_ml": 0.15,
-    "tech": 0.1,
-    "news_company": 0.15,
-    "news_market": 0.08,
-    "news_politics": 0.05
+    "k_ml": 0.0,
+    "tech": 0.0,
+    "news_company": 0.0,
+    "news_market": 0.0,
+    "news_politics": 0.4
   },
-  "source": "prior (candidate rejected by shadow test)",
-  "n_used": 4138,
-  "updated_at": "2026-11-12 02:20",
+  "source": "adaptive",
+  "n_used": 4183,
+  "updated_at": "2026-11-12 03:57",
   "history": [
-    {
-      "at": "2026-10-08 02:46",
-      "n": 2958,
-      "adopted": true,
-      "brier_candidate": 0.2462,
-      "brier_prior": 0.249,
-      "weights": {
-        "k_ml": 0.0,
-        "tech": 0.0,
-        "news_company": 0.0,
-        "news_market": 0.1452,
-        "news_politics": 0.4
-      }
-    },
     {
       "at": "2026-10-09 01:18",
       "n": 2962,
@@ -708,6 +694,20 @@
         "news_company": 0.15,
         "news_market": 0.08,
         "news_politics": 0.05
+      }
+    },
+    {
+      "at": "2026-11-12 03:57",
+      "n": 4183,
+      "adopted": true,
+      "brier_candidate": 0.2537,
+      "brier_prior": 0.2541,
+      "weights": {
+        "k_ml": 0.0,
+        "tech": 0.0,
+        "news_company": 0.0,
+        "news_market": 0.0,
+        "news_politics": 0.4
       }
     }
   ]
