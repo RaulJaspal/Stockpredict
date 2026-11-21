@@ -8,22 +8,8 @@
   },
   "source": "adaptive",
   "n_used": 4525,
-  "updated_at": "2026-11-21 02:37",
+  "updated_at": "2026-11-21 04:06",
   "history": [
-    {
-      "at": "2026-10-17 01:23",
-      "n": 3255,
-      "adopted": false,
-      "brier_candidate": 0.2575,
-      "brier_prior": 0.2539,
-      "weights": {
-        "k_ml": 0.15,
-        "tech": 0.1,
-        "news_company": 0.15,
-        "news_market": 0.08,
-        "news_politics": 0.05
-      }
-    },
     {
       "at": "2026-10-20 00:28",
       "n": 3305,
@@ -698,6 +684,20 @@
     },
     {
       "at": "2026-11-21 02:37",
+      "n": 4525,
+      "adopted": true,
+      "brier_candidate": 0.2665,
+      "brier_prior": 0.282,
+      "weights": {
+        "k_ml": 0.0,
+        "tech": 0.0,
+        "news_company": 0.0,
+        "news_market": 0.0712,
+        "news_politics": 0.4
+      }
+    },
+    {
+      "at": "2026-11-21 04:06",
       "n": 4525,
       "adopted": true,
       "brier_candidate": 0.2665,
